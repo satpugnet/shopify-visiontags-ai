@@ -49,6 +49,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     shop,
     productCount,
     billing,
+    proFeatures: PLANS.PRO.features,
+    proPrice: PLANS.PRO.price,
     jobs: jobs.map((job) => ({
       id: job.id,
       status: job.status,
@@ -132,7 +134,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function Dashboard() {
-  const { shop, productCount, billing, jobs } = useLoaderData<typeof loader>();
+  const { shop, productCount, billing, jobs, proFeatures, proPrice } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
   const shopify = useAppBridge();
 
@@ -334,7 +336,7 @@ export default function Dashboard() {
                   {billing.plan === "FREE" ? "Upgrade to Pro" : "Pro Features"}
                 </Text>
                 <BlockStack gap="100">
-                  {PLANS.PRO.features.map((feature, i) => (
+                  {proFeatures.map((feature, i) => (
                     <Text as="p" variant="bodyMd" key={i}>
                       {feature}
                     </Text>
@@ -342,7 +344,7 @@ export default function Dashboard() {
                 </BlockStack>
                 {billing.plan === "FREE" && (
                   <Button url="/app/billing">
-                    Upgrade for ${PLANS.PRO.price}/month
+                    Upgrade for ${proPrice}/month
                   </Button>
                 )}
               </BlockStack>
