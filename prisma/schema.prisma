@@ -1,0 +1,92 @@
+// VisionTags: AI Tags & Metafields
+// Database schema for PostgreSQL
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Session {
+  id                  String    @id
+  shop                String
+  state               String
+  isOnline            Boolean   @default(false)
+  scope               String?
+  expires             DateTime?
+  accessToken         String
+  userId              BigInt?
+  firstName           String?
+  lastName            String?
+  email               String?
+  accountOwner        Boolean   @default(false)
+  locale              String?
+  collaborator        Boolean?  @default(false)
+  emailVerified       Boolean?  @default(false)
+  refreshToken        String?
+  refreshTokenExpires DateTime?
+
+  @@index([shop])
+}
+
+model Job {
+  id           String    @id @default(uuid())
+  shop         String
+  collectionId String?
+  status       String    @default("QUEUED") // QUEUED, PROCESSING, COMPLETED, FAILED
+  totalItems   Int       @default(0)
+  processed    Int       @default(0)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  products     Product[]
+
+  @@index([shop])
+  @@index([status])
+}
+
+model Product {
+  id                  String    @id
+  jobId               String
+  job                 Job       @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  title               String
+  imageUrl            String
+  currentCategory     String?   // Current Shopify category
+  currentMetafields   Json?     // Current metafield values (JSON)
+  currentTags         String?   // Current tags (comma-separated)
+  suggestedMetafields Json?     // AI-suggested metafield values (JSON)
+  suggestedTags       Json?     // AI-suggested tags (JSON array)
+  syncedAt            DateTime? // When this product was synced
+  status              String    @default("PENDING") // PENDING, ANALYZED, SYNCED, ERROR
+  error               String?
+  createdAt           DateTime  @default(now())
+
+  @@index([jobId])
+  @@index([status])
+}
+
+// Track shop settings and subscription
+model ShopSettings {
+  id                   String   @id @default(uuid())
+  shop                 String   @unique
+  plan                 String   @default("FREE") // FREE, PRO
+  creditsUsed          Int      @default(0)      // Credits used this billing period
+  creditLimit          Int      @default(50)     // 50 (Free), 2000 (Pro)
+  billingPeriodStart   DateTime @default(now())
+  autoSyncNewProducts  Boolean  @default(false)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+}
+
+// Track usage for billing
+model UsageRecord {
+  id        String   @id @default(uuid())
+  shop      String
+  month     String   // "2025-01" format
+  count     Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@unique([shop, month])
+}
