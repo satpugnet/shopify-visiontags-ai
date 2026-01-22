@@ -105,6 +105,7 @@ export function toMetafieldInputs(metafields: ProductMetafields): MetafieldInput
 
 /**
  * Update product metafields via Shopify Admin API
+ * Uses metafieldsSet mutation for reliable metafield updates
  */
 export async function updateProductMetafields(
   admin: AdminApiContext,
@@ -118,61 +119,64 @@ export async function updateProductMetafields(
     const inputs = toMetafieldInputs(filtered);
 
     if (inputs.length === 0) {
+      console.log(`[Metafields] No metafields to update for ${productId}`);
       return { success: true }; // Nothing to update
     }
 
-    // Build metafields for the mutation
+    console.log(`[Metafields] Setting ${inputs.length} metafields for ${productId}:`, inputs);
+
+    // Use metafieldsSet mutation for reliable metafield updates
+    // This mutation is specifically designed for setting metafields
     const metafieldsInput = inputs.map((input) => ({
       namespace: input.namespace,
       key: input.key,
       value: input.value,
       type: input.type,
+      ownerId: productId,
     }));
 
     const response = await admin.graphql(
       `#graphql
-      mutation productUpdate($input: ProductInput!) {
-        productUpdate(input: $input) {
-          product {
+      mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
+        metafieldsSet(metafields: $metafields) {
+          metafields {
             id
-            metafields(first: 20) {
-              edges {
-                node {
-                  namespace
-                  key
-                  value
-                }
-              }
-            }
+            namespace
+            key
+            value
           }
           userErrors {
             field
             message
+            code
           }
         }
       }`,
       {
         variables: {
-          input: {
-            id: productId,
-            metafields: metafieldsInput,
-          },
+          metafields: metafieldsInput,
         },
       }
     );
 
     const data = await response.json();
 
-    if (data.data?.productUpdate?.userErrors?.length > 0) {
-      const errors = data.data.productUpdate.userErrors
-        .map((e: { message: string }) => e.message)
+    console.log(`[Metafields] API response for ${productId}:`, JSON.stringify(data, null, 2));
+
+    if (data.data?.metafieldsSet?.userErrors?.length > 0) {
+      const errors = data.data.metafieldsSet.userErrors
+        .map((e: { message: string; code?: string }) => `${e.message}${e.code ? ` (${e.code})` : ''}`)
         .join(", ");
+      console.error(`[Metafields] Error for ${productId}:`, errors);
       return { success: false, error: errors };
     }
 
+    const setMetafields = data.data?.metafieldsSet?.metafields || [];
+    console.log(`[Metafields] Successfully set ${setMetafields.length} metafields for ${productId}`);
+
     return { success: true };
   } catch (error) {
-    console.error("Error updating metafields:", error);
+    console.error("[Metafields] Error updating metafields:", error);
     return {
       success: false,
       error: error instanceof Error ? error.message : "Unknown error",

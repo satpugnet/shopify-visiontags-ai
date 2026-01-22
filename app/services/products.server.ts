@@ -150,6 +150,8 @@ export async function updateProductTags(
   tags: string[]
 ): Promise<{ success: boolean; error?: string }> {
   try {
+    console.log(`[Tags] Setting ${tags.length} tags for ${productId}:`, tags);
+
     const response = await admin.graphql(
       `#graphql
       mutation productUpdate($input: ProductInput!) {
@@ -176,16 +178,22 @@ export async function updateProductTags(
 
     const data = await response.json();
 
+    console.log(`[Tags] API response for ${productId}:`, JSON.stringify(data, null, 2));
+
     if (data.data?.productUpdate?.userErrors?.length > 0) {
       const errors = data.data.productUpdate.userErrors
         .map((e: { message: string }) => e.message)
         .join(", ");
+      console.error(`[Tags] Error for ${productId}:`, errors);
       return { success: false, error: errors };
     }
 
+    const updatedTags = data.data?.productUpdate?.product?.tags || [];
+    console.log(`[Tags] Successfully set ${updatedTags.length} tags for ${productId}`);
+
     return { success: true };
   } catch (error) {
-    console.error("Error updating tags:", error);
+    console.error("[Tags] Error updating tags:", error);
     return {
       success: false,
       error: error instanceof Error ? error.message : "Unknown error",
