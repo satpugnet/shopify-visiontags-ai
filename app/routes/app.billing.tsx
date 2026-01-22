@@ -126,6 +126,28 @@ export default function Billing() {
               <Text as="p" variant="bodySm" tone="subdued">
                 {billing.creditsRemaining} credits remaining
               </Text>
+
+              {billing.overageEnabled && billing.overageScans > 0 && (
+                <BlockStack gap="100">
+                  <Divider />
+                  <InlineStack align="space-between">
+                    <Text as="span" variant="bodyMd">
+                      Overage scans this month
+                    </Text>
+                    <Text as="span" variant="bodyMd" fontWeight="semibold">
+                      {billing.overageScans} scans
+                    </Text>
+                  </InlineStack>
+                  <InlineStack align="space-between">
+                    <Text as="span" variant="bodyMd">
+                      Overage charges
+                    </Text>
+                    <Text as="span" variant="bodyMd" fontWeight="semibold">
+                      ${billing.overageCharge.toFixed(2)} / ${billing.overageCap.toFixed(2)} cap
+                    </Text>
+                  </InlineStack>
+                </BlockStack>
+              )}
             </BlockStack>
           </BlockStack>
         </Card>

@@ -86,12 +86,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       });
     }
 
-    // Check credits
-    const hasCredits = await hasAvailableCredits(shop, products.length);
-    if (!hasCredits) {
+    // Check credits (including overage capacity for Pro users)
+    const creditCheck = await hasAvailableCredits(shop, products.length);
+    if (!creditCheck.allowed) {
       const billing = await getShopBilling(shop);
       const errorMessage = billing.plan === "PRO"
-        ? "Not enough credits. Credits will reset at the start of your next billing cycle."
+        ? "Credit limit reached and overage cap hit. Credits will reset at the start of your next billing cycle."
         : "Not enough credits. Upgrade to Pro for 2,000 credits/month.";
       return json({
         error: errorMessage,
@@ -218,6 +218,18 @@ export default function Dashboard() {
             <p>
               You have {billing.creditsRemaining} credits remaining this month.
               Upgrade to Pro for 2,000 credits/month.
+            </p>
+          </Banner>
+        )}
+
+        {billing.plan === "PRO" && billing.overageScans > 0 && (
+          <Banner
+            title="Using overage credits"
+            tone="info"
+          >
+            <p>
+              You've used {billing.overageScans} overage scans (${billing.overageCharge.toFixed(2)} of ${billing.overageCap.toFixed(2)} cap).
+              Additional scans are billed at $0.01 each.
             </p>
           </Banner>
         )}

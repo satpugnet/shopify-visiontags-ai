@@ -12,18 +12,24 @@ export const PLANS = {
     name: "Free",
     credits: 50,
     price: 0,
+    overageEnabled: false,
+    overagePrice: 0,
     features: ["50 AI scans/month", "Basic metafields", "Basic tags"],
   },
   PRO: {
     name: "Pro",
     credits: 2000,
     price: 19,
+    overageEnabled: true,
+    overagePrice: 0.01, // $0.01 per scan after limit
+    overageCap: 50, // Max $50 overage per billing cycle
     features: [
       "2,000 AI scans/month",
       "All metafields",
       "SEO tags",
       "Auto-sync new products",
       "Priority support",
+      "Pay-as-you-go after limit ($0.01/scan)",
     ],
   },
 } as const;
@@ -37,6 +43,10 @@ export interface ShopBilling {
   creditsRemaining: number;
   billingPeriodStart: Date;
   autoSyncEnabled: boolean;
+  overageScans: number;
+  overageCharge: number;
+  overageEnabled: boolean;
+  overageCap: number;
 }
 
 /**
@@ -65,48 +75,113 @@ export async function getOrCreateShopSettings(shop: string) {
  */
 export async function getShopBilling(shop: string): Promise<ShopBilling> {
   const settings = await getOrCreateShopSettings(shop);
+  const plan = settings.plan as PlanType;
+  const planConfig = PLANS[plan];
+
+  // Calculate overage (scans beyond the credit limit)
+  const overageScans = Math.max(0, settings.creditsUsed - settings.creditLimit);
+  const overagePrice = 'overagePrice' in planConfig ? planConfig.overagePrice : 0;
+  const overageCap = 'overageCap' in planConfig ? planConfig.overageCap : 0;
+  const overageCharge = Math.min(overageScans * overagePrice, overageCap);
 
   return {
-    plan: settings.plan as PlanType,
-    creditsUsed: settings.creditsUsed,
+    plan,
+    creditsUsed: Math.min(settings.creditsUsed, settings.creditLimit),
     creditLimit: settings.creditLimit,
-    creditsRemaining: settings.creditLimit - settings.creditsUsed,
+    creditsRemaining: Math.max(0, settings.creditLimit - settings.creditsUsed),
     billingPeriodStart: settings.billingPeriodStart,
     autoSyncEnabled: settings.autoSyncNewProducts,
+    overageScans,
+    overageCharge,
+    overageEnabled: planConfig.overageEnabled,
+    overageCap,
   };
 }
 
 /**
- * Check if shop has available credits
+ * Check if shop has available credits (or overage capacity for Pro)
  */
 export async function hasAvailableCredits(
   shop: string,
   required: number = 1
-): Promise<boolean> {
+): Promise<{ allowed: boolean; useOverage: boolean; overageCount: number }> {
   const billing = await getShopBilling(shop);
-  return billing.creditsRemaining >= required;
+
+  // If enough regular credits, use those
+  if (billing.creditsRemaining >= required) {
+    return { allowed: true, useOverage: false, overageCount: 0 };
+  }
+
+  // For Pro users, check if overage is available
+  if (billing.overageEnabled) {
+    const remainingOverageBudget = billing.overageCap - billing.overageCharge;
+    const overagePrice = PLANS.PRO.overagePrice;
+    const maxOverageScans = Math.floor(remainingOverageBudget / overagePrice);
+
+    // Calculate how many would go to overage
+    const overageNeeded = required - billing.creditsRemaining;
+
+    if (overageNeeded <= maxOverageScans) {
+      return {
+        allowed: true,
+        useOverage: true,
+        overageCount: overageNeeded
+      };
+    }
+  }
+
+  return { allowed: false, useOverage: false, overageCount: 0 };
 }
 
 /**
- * Use credits for a shop
+ * Use credits for a shop (supports overage for Pro users)
  */
 export async function useCredits(
   shop: string,
   count: number
-): Promise<{ success: boolean; remaining: number }> {
+): Promise<{ success: boolean; remaining: number; overageUsed: number }> {
   const settings = await getOrCreateShopSettings(shop);
+  const plan = settings.plan as PlanType;
+  const planConfig = PLANS[plan];
 
-  if (settings.creditsUsed + count > settings.creditLimit) {
+  // Check if this would exceed limits
+  const newTotal = settings.creditsUsed + count;
+  const wouldExceedLimit = newTotal > settings.creditLimit;
+
+  if (wouldExceedLimit && !planConfig.overageEnabled) {
+    // Free plan: no overage allowed
     return {
       success: false,
       remaining: settings.creditLimit - settings.creditsUsed,
+      overageUsed: 0,
     };
   }
 
+  if (wouldExceedLimit && planConfig.overageEnabled) {
+    // Pro plan: check overage cap
+    const currentOverage = Math.max(0, settings.creditsUsed - settings.creditLimit);
+    const overagePrice = 'overagePrice' in planConfig ? planConfig.overagePrice : 0;
+    const overageCap = 'overageCap' in planConfig ? planConfig.overageCap : 0;
+    const currentOverageCharge = currentOverage * overagePrice;
+
+    const newOverage = newTotal - settings.creditLimit;
+    const newOverageCharge = newOverage * overagePrice;
+
+    if (newOverageCharge > overageCap) {
+      // Would exceed overage cap
+      return {
+        success: false,
+        remaining: 0,
+        overageUsed: currentOverage,
+      };
+    }
+  }
+
+  // Update credits (allow exceeding creditLimit for Pro users with overage)
   const updated = await prisma.shopSettings.update({
     where: { shop },
     data: {
-      creditsUsed: settings.creditsUsed + count,
+      creditsUsed: newTotal,
     },
   });
 
@@ -118,9 +193,14 @@ export async function useCredits(
     update: { count: { increment: count } },
   });
 
+  // Calculate remaining and overage
+  const remaining = Math.max(0, updated.creditLimit - updated.creditsUsed);
+  const overageUsed = Math.max(0, updated.creditsUsed - updated.creditLimit);
+
   return {
     success: true,
-    remaining: updated.creditLimit - updated.creditsUsed,
+    remaining,
+    overageUsed,
   };
 }
 
