@@ -4,19 +4,24 @@
  */
 
 import { Queue, Worker, Job as BullJob } from "bullmq";
-import IORedis from "ioredis";
 import { analyzeProductImage, isVisionError } from "./vision.server";
 import prisma from "../db.server";
 
-// Redis connection
-const getRedisConnection = () => {
+// Redis connection options for BullMQ
+const getRedisConnectionOptions = () => {
   const redisUrl = process.env.REDIS_URL;
   if (!redisUrl) {
     throw new Error("REDIS_URL environment variable is required");
   }
-  return new IORedis(redisUrl, {
-    maxRetriesPerRequest: null, // Required by BullMQ
-  });
+  // Parse the URL for BullMQ connection options
+  const url = new URL(redisUrl);
+  return {
+    host: url.hostname,
+    port: parseInt(url.port || "6379"),
+    password: url.password || undefined,
+    username: url.username || undefined,
+    maxRetriesPerRequest: null as null, // Required by BullMQ
+  };
 };
 
 // Queue names
@@ -38,7 +43,7 @@ let analysisQueue: Queue<AnalysisJobData> | null = null;
  */
 export function getAnalysisQueue(): Queue<AnalysisJobData> {
   if (!analysisQueue) {
-    const connection = getRedisConnection();
+    const connection = getRedisConnectionOptions();
     analysisQueue = new Queue<AnalysisJobData>(QUEUE_NAME, {
       connection,
       defaultJobOptions: {
@@ -105,7 +110,7 @@ export async function queueBulkAnalysis(
  * Should be called once on server startup
  */
 export function startAnalysisWorker(): Worker<AnalysisJobData> {
-  const connection = getRedisConnection();
+  const connection = getRedisConnectionOptions();
 
   const worker = new Worker<AnalysisJobData>(
     QUEUE_NAME,

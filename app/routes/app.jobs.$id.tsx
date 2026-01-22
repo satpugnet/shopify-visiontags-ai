@@ -152,9 +152,15 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   return json({ success: false });
 };
 
+type ActionData = {
+  success: boolean;
+  message?: string;
+  error?: string;
+};
+
 export default function JobDetail() {
   const { job, products } = useLoaderData<typeof loader>();
-  const fetcher = useFetcher<typeof action>();
+  const fetcher = useFetcher<ActionData>();
   const navigate = useNavigate();
   const shopify = useAppBridge();
 
@@ -166,7 +172,7 @@ export default function JobDetail() {
   const resourceName = { singular: "product", plural: "products" };
 
   const { selectedResources, allResourcesSelected, handleSelectionChange } =
-    useIndexResourceState(analyzedProducts.map((p) => p.id));
+    useIndexResourceState(analyzedProducts as { id: string }[]);
 
   const isSyncing = fetcher.state === "submitting";
 
@@ -343,7 +349,7 @@ export default function JobDetail() {
                     (!syncMetafields && !syncTags)
                   }
                 >
-                  Sync {selectedResources.length} Selected Products
+                  {`Sync ${selectedResources.length} Selected Products`}
                 </Button>
                 <Text as="span" variant="bodySm" tone="subdued">
                   {analyzedProducts.length} products ready to sync

@@ -71,8 +71,8 @@ export async function fetchAllProducts(
       }
     );
 
-    const data = await response.json();
-    const edges = data.data?.products?.edges || [];
+    const data: any = await response.json();
+    const edges: any[] = data.data?.products?.edges || [];
     const pageInfo = data.data?.products?.pageInfo;
 
     for (const edge of edges) {
@@ -258,8 +258,8 @@ export async function fetchCollectionProducts(
       }
     );
 
-    const data = await response.json();
-    const edges = data.data?.collection?.products?.edges || [];
+    const data: any = await response.json();
+    const edges: any[] = data.data?.collection?.products?.edges || [];
     const pageInfo = data.data?.collection?.products?.pageInfo;
 
     for (const edge of edges) {

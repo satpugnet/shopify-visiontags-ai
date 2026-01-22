@@ -133,9 +133,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   return json({ success: false });
 };
 
+type ActionData = {
+  success: boolean;
+  jobId?: string;
+  error?: string;
+};
+
 export default function Dashboard() {
   const { shop, productCount, billing, jobs, proFeatures, proPrice } = useLoaderData<typeof loader>();
-  const fetcher = useFetcher<typeof action>();
+  const fetcher = useFetcher<ActionData>();
   const shopify = useAppBridge();
 
   const isScanning =
@@ -210,7 +216,7 @@ export default function Dashboard() {
                     Your Store
                   </Text>
                   <Badge tone={billing.plan === "PRO" ? "success" : "info"}>
-                    {billing.plan} Plan
+                    {`${billing.plan} Plan`}
                   </Badge>
                 </InlineStack>
 
@@ -344,7 +350,7 @@ export default function Dashboard() {
                 </BlockStack>
                 {billing.plan === "FREE" && (
                   <Button url="/app/billing">
-                    Upgrade for ${proPrice}/month
+                    {`Upgrade for $${proPrice}/month`}
                   </Button>
                 )}
               </BlockStack>
