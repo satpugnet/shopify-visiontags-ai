@@ -20,7 +20,6 @@ import {
 import { TitleBar, useAppBridge } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
-import { Prisma } from "@prisma/client";
 import { countProducts } from "../services/products.server";
 import { getShopBilling, PLANS } from "../services/billing.server";
 
@@ -105,36 +104,28 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       },
     });
 
-    // Create or update product records
-    // Use upsert to handle products that may already exist from previous scans
-    await Promise.all(
-      products.map((p) =>
-        prisma.product.upsert({
-          where: { id: p.id },
-          create: {
-            id: p.id,
-            jobId: job.id,
-            title: p.title,
-            imageUrl: p.imageUrl,
-            currentCategory: p.category,
-            currentTags: p.tags.join(", "),
-            status: "PENDING",
-          },
-          update: {
-            jobId: job.id,
-            title: p.title,
-            imageUrl: p.imageUrl,
-            currentCategory: p.category,
-            currentTags: p.tags.join(", "),
-            status: "PENDING",
-            suggestedMetafields: Prisma.JsonNull,
-            suggestedTags: Prisma.JsonNull,
-            syncedAt: null,
-            error: null,
-          },
-        })
-      )
-    );
+    // Create or update product records using a transaction
+    // First delete existing products, then create new ones (simpler than upsert)
+    const productIds = products.map((p) => p.id);
+
+    await prisma.$transaction([
+      // Delete existing products that will be rescanned
+      prisma.product.deleteMany({
+        where: { id: { in: productIds } },
+      }),
+      // Create fresh product records
+      prisma.product.createMany({
+        data: products.map((p) => ({
+          id: p.id,
+          jobId: job.id,
+          title: p.title,
+          imageUrl: p.imageUrl,
+          currentCategory: p.category,
+          currentTags: p.tags.join(", "),
+          status: "PENDING",
+        })),
+      }),
+    ]);
 
     // Queue for processing
     await queueBulkAnalysis(
