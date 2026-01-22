@@ -82,13 +82,26 @@ const BottomCallout: React.FC<{ delay: number }> = ({ delay }) => {
 export const DashboardScene: React.FC = () => {
   return (
     <AbsoluteFill>
-      {/* Screenshot with pan-zoom animation */}
-      <ScreenshotFrame
-        src="screenshots/visiontags-dashboard.png"
-        animation="panZoom"
-        width={1600}
-        height={900}
-      />
+      {/* Screenshot with pan-zoom animation - positioned lower to avoid header overlap */}
+      <div
+        style={{
+          position: "absolute",
+          top: 120,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+        }}
+      >
+        <ScreenshotFrame
+          src="screenshots/visiontags-dashboard.png"
+          animation="panZoom"
+          width={1500}
+          height={820}
+        />
+      </div>
 
       {/* Text overlay at top */}
       <TopOverlay delay={30} />

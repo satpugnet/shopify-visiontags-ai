@@ -14,33 +14,33 @@ export const DemoVideo: React.FC = () => {
       }}
     >
       <Series>
-        {/* Scene 1: Opening Hook (0-5s = 150 frames) */}
-        <Series.Sequence durationInFrames={150}>
+        {/* Scene 1: Opening Hook (~3s) */}
+        <Series.Sequence durationInFrames={100}>
           <OpeningScene />
         </Series.Sequence>
 
-        {/* Scene 2: Dashboard Overview (5-15s = 300 frames) */}
-        <Series.Sequence durationInFrames={300}>
+        {/* Scene 2: Dashboard Overview (~6s) */}
+        <Series.Sequence durationInFrames={180}>
           <DashboardScene />
         </Series.Sequence>
 
-        {/* Scene 3: AI Processing (15-25s = 300 frames) */}
-        <Series.Sequence durationInFrames={300}>
+        {/* Scene 3: AI Processing (~7s) */}
+        <Series.Sequence durationInFrames={210}>
           <ProcessingScene />
         </Series.Sequence>
 
-        {/* Scene 4: Results Preview (25-40s = 450 frames) */}
-        <Series.Sequence durationInFrames={450}>
+        {/* Scene 4: Results Preview (~10s) */}
+        <Series.Sequence durationInFrames={300}>
           <ResultsScene />
         </Series.Sequence>
 
-        {/* Scene 5: Sync Action (40-50s = 300 frames) */}
-        <Series.Sequence durationInFrames={300}>
+        {/* Scene 5: Sync Action (~6s) */}
+        <Series.Sequence durationInFrames={180}>
           <SyncScene />
         </Series.Sequence>
 
-        {/* Scene 6: Closing CTA (50-60s = 300 frames) */}
-        <Series.Sequence durationInFrames={300}>
+        {/* Scene 6: Closing CTA (~8s) */}
+        <Series.Sequence durationInFrames={230}>
           <ClosingScene />
         </Series.Sequence>
       </Series>
