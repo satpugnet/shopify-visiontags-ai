@@ -7,6 +7,9 @@ import type { AdminApiContext } from "@shopify/shopify-app-remix/server";
 import prisma from "../db.server";
 
 // Plan configurations
+// Using Claude Haiku 4.5: ~$0.003/scan
+// Free: 50 scans = ~$0.15 cost (acquisition cost)
+// Pro: 5,000 scans = ~$15 cost, $19 revenue = $4 profit (21% margin)
 export const PLANS = {
   FREE: {
     name: "Free",
@@ -18,18 +21,18 @@ export const PLANS = {
   },
   PRO: {
     name: "Pro",
-    credits: 2000,
+    credits: 5000,
     price: 19,
     overageEnabled: true,
-    overagePrice: 0.01, // $0.01 per scan after limit
-    overageCap: 50, // Max $50 overage per billing cycle
+    overagePrice: 0.005, // $0.005 per scan after limit (with margin)
+    overageCap: 25, // Max $25 overage per billing cycle
     features: [
-      "2,000 AI scans/month",
+      "5,000 AI scans/month",
       "All metafields",
       "SEO tags",
       "Auto-sync new products",
       "Priority support",
-      "Pay-as-you-go after limit ($0.01/scan)",
+      "Pay-as-you-go after limit ($0.005/scan)",
     ],
   },
 } as const;

@@ -63,11 +63,11 @@ export default function TermsOfService() {
 
       <h3>Pro Plan ($19/month)</h3>
       <ul>
-        <li>2,000 AI scans per month</li>
+        <li>5,000 AI scans per month</li>
         <li>All metafields and SEO tags</li>
         <li>Auto-sync for new products</li>
         <li>Priority support</li>
-        <li>Pay-as-you-go overage ($0.01/scan, up to $50/month cap)</li>
+        <li>Pay-as-you-go overage ($0.005/scan, up to $25/month cap)</li>
       </ul>
 
       <h3>Billing Terms</h3>

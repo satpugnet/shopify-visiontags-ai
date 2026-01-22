@@ -46,7 +46,7 @@ Shopify app that uses Claude Vision to auto-fill BOTH metafields AND tags from p
 - **Framework**: Remix (Shopify App Template)
 - **Database**: PostgreSQL (via Prisma)
 - **Queue**: BullMQ + Redis
-- **AI**: Claude Sonnet 4 (claude-sonnet-4-20250514)
+- **AI**: Claude Haiku 4.5 (claude-haiku-4-5-20250514)
 - **UI**: Polaris + App Bridge
 - **Deployment**: Railway (recommended)
 
@@ -72,7 +72,12 @@ app/
 | Plan  | Price   | Credits/mo | Features |
 |-------|---------|------------|----------|
 | Free  | $0      | 50         | Basic scan |
-| Pro   | $19/mo  | 2,000      | Auto-sync, all features |
+| Pro   | $19/mo  | 5,000      | Auto-sync, all features |
+
+### Cost Analysis (Claude Haiku 4.5)
+- Cost per scan: ~$0.003
+- Free (50 scans): ~$0.15 cost (acquisition)
+- Pro (5,000 scans): ~$15 cost, $4 profit (21% margin)
 
 ## Current Progress
 
