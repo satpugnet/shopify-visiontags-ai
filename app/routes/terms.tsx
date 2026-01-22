@@ -178,7 +178,7 @@ export default function TermsOfService() {
         For questions about these Terms, please contact us:
       </p>
       <ul>
-        <li>Email: support@visiontags.app</li>
+        <li>Email: saturnin.13@hotmail.fr</li>
       </ul>
 
       <div style={{
