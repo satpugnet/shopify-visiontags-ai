@@ -89,8 +89,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     // Check credits
     const hasCredits = await hasAvailableCredits(shop, products.length);
     if (!hasCredits) {
+      const billing = await getShopBilling(shop);
+      const errorMessage = billing.plan === "PRO"
+        ? "Not enough credits. Credits will reset at the start of your next billing cycle."
+        : "Not enough credits. Upgrade to Pro for 2,000 credits/month.";
       return json({
-        error: "Not enough credits. Please upgrade to Pro plan.",
+        error: errorMessage,
         success: false,
       });
     }
