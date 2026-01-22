@@ -65,6 +65,29 @@ export interface VisionError {
 export type VisionResponse = VisionResult | VisionError;
 
 /**
+ * Strip markdown code blocks from Claude's response
+ * Claude sometimes wraps JSON in ```json ... ``` despite instructions
+ */
+function stripMarkdownCodeBlocks(text: string): string {
+  // Remove ```json or ``` at the start and ``` at the end
+  let cleaned = text.trim();
+
+  // Match opening code fence with optional language
+  const openingMatch = cleaned.match(/^```(?:json)?\s*\n?/);
+  if (openingMatch) {
+    cleaned = cleaned.slice(openingMatch[0].length);
+  }
+
+  // Match closing code fence
+  const closingMatch = cleaned.match(/\n?```\s*$/);
+  if (closingMatch) {
+    cleaned = cleaned.slice(0, -closingMatch[0].length);
+  }
+
+  return cleaned.trim();
+}
+
+/**
  * Optimize Shopify image URL by appending size suffix
  * This reduces tokens and bandwidth
  */
@@ -135,9 +158,10 @@ export async function analyzeProductImage(
       };
     }
 
-    // Parse JSON response
+    // Parse JSON response (strip markdown code blocks if present)
     try {
-      const result = JSON.parse(textContent.text) as VisionResult;
+      const cleanedText = stripMarkdownCodeBlocks(textContent.text);
+      const result = JSON.parse(cleanedText) as VisionResult;
 
       // Validate structure
       if (!result.metafields || !result.tags) {
