@@ -46,7 +46,7 @@ Shopify app that uses Claude Vision to auto-fill BOTH metafields AND tags from p
 - **Framework**: Remix (Shopify App Template)
 - **Database**: PostgreSQL (via Prisma)
 - **Queue**: BullMQ + Redis
-- **AI**: Claude 3.5 Sonnet (claude-3-5-sonnet-20241022)
+- **AI**: Claude Sonnet 4 (claude-sonnet-4-20250514)
 - **UI**: Polaris + App Bridge
 - **Deployment**: Railway (recommended)
 
