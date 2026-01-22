@@ -35,8 +35,9 @@ export interface AnalysisJobData {
   shop: string;
 }
 
-// Singleton queue instance
+// Singleton instances
 let analysisQueue: Queue<AnalysisJobData> | null = null;
+let analysisWorker: Worker<AnalysisJobData> | null = null;
 
 /**
  * Get or create the analysis queue
@@ -62,8 +63,9 @@ export function getAnalysisQueue(): Queue<AnalysisJobData> {
 
 /**
  * Sanitize an ID for use as a BullMQ job ID (no colons allowed)
+ * Exported for testing
  */
-function sanitizeJobId(id: string): string {
+export function sanitizeJobId(id: string): string {
   // Replace colons and slashes with underscores
   return id.replace(/[:/]/g, "_");
 }
@@ -119,12 +121,16 @@ export async function queueBulkAnalysis(
 
 /**
  * Create and start the worker that processes analysis jobs
- * Should be called once on server startup
+ * Uses singleton pattern - safe to call multiple times
  */
 export function startAnalysisWorker(): Worker<AnalysisJobData> {
+  if (analysisWorker) {
+    return analysisWorker;
+  }
+
   const connection = getRedisConnectionOptions();
 
-  const worker = new Worker<AnalysisJobData>(
+  analysisWorker = new Worker<AnalysisJobData>(
     QUEUE_NAME,
     async (job) => {
       const { jobId, productId, imageUrl } = job.data;
@@ -201,15 +207,16 @@ export function startAnalysisWorker(): Worker<AnalysisJobData> {
     }
   );
 
-  worker.on("completed", (job) => {
+  analysisWorker.on("completed", (job) => {
     console.log(`Job ${job.id} completed`);
   });
 
-  worker.on("failed", (job, err) => {
+  analysisWorker.on("failed", (job, err) => {
     console.error(`Job ${job?.id} failed:`, err.message);
   });
 
-  return worker;
+  console.log("[VisionTags] Analysis worker started");
+  return analysisWorker;
 }
 
 /**
@@ -230,4 +237,16 @@ export async function getQueueStats(): Promise<{
   ]);
 
   return { waiting, active, completed, failed };
+}
+
+/**
+ * Auto-start the worker on module load (server-side only)
+ * This ensures the worker is always running when the server starts
+ */
+if (typeof process !== "undefined" && process.env.REDIS_URL) {
+  try {
+    startAnalysisWorker();
+  } catch (error) {
+    console.error("[VisionTags] Failed to start analysis worker:", error);
+  }
 }
