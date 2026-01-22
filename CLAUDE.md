@@ -8,7 +8,7 @@ Shopify app that uses Claude Vision to auto-fill BOTH metafields AND tags from p
 - [x] Phase 2: Database schema (Prisma/PostgreSQL)
 - [x] Phase 3: Core services (vision, metafields, queue, products, billing)
 - [x] Phase 4: UI routes (dashboard, job detail, webhooks)
-- [x] Phase 5: Deployment (Railway) - Live at shopify-visiontags-ai-production.up.railway.app
+- [x] Phase 5: Deployment (Railway) - Live at visiontags-ai-production.up.railway.app
 - [ ] Phase 6: App Store submission
 
 ## External Accounts & Links
