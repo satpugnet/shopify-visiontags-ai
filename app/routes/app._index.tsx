@@ -104,7 +104,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       },
     });
 
-    // Create product records
+    // Create product records (skip duplicates if products were already scanned before)
     await prisma.product.createMany({
       data: products.map((p) => ({
         id: p.id,
@@ -115,6 +115,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         currentTags: p.tags.join(", "),
         status: "PENDING",
       })),
+      skipDuplicates: true,
     });
 
     // Queue for processing

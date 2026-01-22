@@ -61,6 +61,14 @@ export function getAnalysisQueue(): Queue<AnalysisJobData> {
 }
 
 /**
+ * Sanitize an ID for use as a BullMQ job ID (no colons allowed)
+ */
+function sanitizeJobId(id: string): string {
+  // Replace colons and slashes with underscores
+  return id.replace(/[:/]/g, "_");
+}
+
+/**
  * Add a product to the analysis queue
  */
 export async function queueProductAnalysis(
@@ -70,11 +78,12 @@ export async function queueProductAnalysis(
   shop: string
 ): Promise<BullJob<AnalysisJobData>> {
   const queue = getAnalysisQueue();
+  const sanitizedProductId = sanitizeJobId(productId);
   return queue.add(
-    `analyze-${productId}`,
+    `analyze-${sanitizedProductId}`,
     { jobId, productId, imageUrl, shop },
     {
-      jobId: `${jobId}-${productId}`, // Unique job ID to prevent duplicates
+      jobId: `${jobId}-${sanitizedProductId}`, // Unique job ID to prevent duplicates
     }
   );
 }
@@ -89,18 +98,21 @@ export async function queueBulkAnalysis(
 ): Promise<void> {
   const queue = getAnalysisQueue();
 
-  const jobs = products.map((product) => ({
-    name: `analyze-${product.id}`,
-    data: {
-      jobId,
-      productId: product.id,
-      imageUrl: product.imageUrl,
-      shop,
-    },
-    opts: {
-      jobId: `${jobId}-${product.id}`,
-    },
-  }));
+  const jobs = products.map((product) => {
+    const sanitizedProductId = sanitizeJobId(product.id);
+    return {
+      name: `analyze-${sanitizedProductId}`,
+      data: {
+        jobId,
+        productId: product.id,
+        imageUrl: product.imageUrl,
+        shop,
+      },
+      opts: {
+        jobId: `${jobId}-${sanitizedProductId}`,
+      },
+    };
+  });
 
   await queue.addBulk(jobs);
 }
