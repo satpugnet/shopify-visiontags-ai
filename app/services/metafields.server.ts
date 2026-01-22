@@ -5,14 +5,14 @@
 
 import type { AdminApiContext } from "@shopify/shopify-app-remix/server";
 
-// Shopify Standard Taxonomy metafield mappings
-// Maps our AI output keys to Shopify namespace.key format
+// Custom metafield mappings for VisionTags
+// Note: "shopify" namespace is reserved - we use "custom" for all app metafields
 const METAFIELD_MAPPINGS: Record<string, { namespace: string; key: string; type: string }> = {
-  color: { namespace: "shopify", key: "color-pattern-color", type: "single_line_text_field" },
-  pattern: { namespace: "shopify", key: "color-pattern-pattern", type: "single_line_text_field" },
-  material: { namespace: "shopify", key: "material", type: "single_line_text_field" },
-  target_gender: { namespace: "shopify", key: "target-gender", type: "single_line_text_field" },
-  age_group: { namespace: "shopify", key: "age-group", type: "single_line_text_field" },
+  color: { namespace: "custom", key: "color", type: "single_line_text_field" },
+  pattern: { namespace: "custom", key: "pattern", type: "single_line_text_field" },
+  material: { namespace: "custom", key: "material", type: "single_line_text_field" },
+  target_gender: { namespace: "custom", key: "target_gender", type: "single_line_text_field" },
+  age_group: { namespace: "custom", key: "age_group", type: "single_line_text_field" },
   neckline: { namespace: "custom", key: "neckline", type: "single_line_text_field" },
   sleeve_length: { namespace: "custom", key: "sleeve_length", type: "single_line_text_field" },
   fit: { namespace: "custom", key: "fit", type: "single_line_text_field" },

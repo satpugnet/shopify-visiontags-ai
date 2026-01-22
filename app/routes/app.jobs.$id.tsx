@@ -93,13 +93,17 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 
     let synced = 0;
     let errors = 0;
+    const errorMessages: string[] = [];
 
     for (const productId of productIds) {
       const product = await prisma.product.findUnique({
         where: { id: productId },
       });
 
-      if (!product || product.status !== "ANALYZED") continue;
+      if (!product || product.status !== "ANALYZED") {
+        console.log(`Skipping product ${productId}: not found or not ANALYZED (status: ${product?.status})`);
+        continue;
+      }
 
       const suggestedMetafields = product.suggestedMetafields as Record<
         string,
@@ -109,9 +113,12 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 
       let metaSuccess = true;
       let tagSuccess = true;
+      let metaError: string | undefined;
+      let tagError: string | undefined;
 
       // Sync metafields
       if (syncMetafields && suggestedMetafields) {
+        console.log(`Syncing metafields for ${product.title}:`, suggestedMetafields);
         const result = await updateProductMetafields(
           admin,
           productId,
@@ -119,12 +126,21 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
           product.currentCategory
         );
         metaSuccess = result.success;
+        metaError = result.error;
+        if (!metaSuccess) {
+          console.error(`Metafield sync failed for ${product.title}:`, metaError);
+        }
       }
 
       // Sync tags
       if (syncTags && suggestedTags) {
+        console.log(`Syncing tags for ${product.title}:`, suggestedTags);
         const result = await updateProductTags(admin, productId, suggestedTags);
         tagSuccess = result.success;
+        tagError = result.error;
+        if (!tagSuccess) {
+          console.error(`Tag sync failed for ${product.title}:`, tagError);
+        }
       }
 
       if (metaSuccess && tagSuccess) {
@@ -138,14 +154,30 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         synced++;
       } else {
         errors++;
+        const errMsg = [metaError, tagError].filter(Boolean).join("; ");
+        errorMessages.push(`${product.title}: ${errMsg}`);
+        // Store error in database
+        await prisma.product.update({
+          where: { id: productId },
+          data: {
+            error: errMsg,
+          },
+        });
       }
     }
+
+    const message = errors > 0 && errorMessages.length > 0
+      ? `Synced ${synced} products, ${errors} failed: ${errorMessages[0]}`
+      : `Synced ${synced} products${errors > 0 ? `, ${errors} failed` : ""}`;
+
+    console.log("Sync complete:", { synced, errors, errorMessages });
 
     return json({
       success: true,
       synced,
       errors,
-      message: `Synced ${synced} products${errors > 0 ? `, ${errors} failed` : ""}`,
+      message,
+      errorDetails: errorMessages,
     });
   }
 
