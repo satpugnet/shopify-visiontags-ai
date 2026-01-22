@@ -1,7 +1,16 @@
 # VisionTags: AI Tags & Metafields
 # This file stores configurations for your Shopify app.
 
+client_id = "82198424193060d95d80f7b9e011c21b"
+name = "VisionTags"
+application_url = "https://visiontags-ai-production.up.railway.app"
+embedded = true
+
+[access_scopes]
 scopes = "read_products,write_products"
+
+[auth]
+redirect_urls = ["https://visiontags-ai-production.up.railway.app/auth/callback"]
 
 [webhooks]
 api_version = "2025-01"
