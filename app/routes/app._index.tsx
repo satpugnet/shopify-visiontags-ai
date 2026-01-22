@@ -20,6 +20,7 @@ import {
 import { TitleBar, useAppBridge } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
+import { Prisma } from "@prisma/client";
 import { countProducts } from "../services/products.server";
 import { getShopBilling, PLANS } from "../services/billing.server";
 
@@ -104,19 +105,36 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       },
     });
 
-    // Create product records (skip duplicates if products were already scanned before)
-    await prisma.product.createMany({
-      data: products.map((p) => ({
-        id: p.id,
-        jobId: job.id,
-        title: p.title,
-        imageUrl: p.imageUrl,
-        currentCategory: p.category,
-        currentTags: p.tags.join(", "),
-        status: "PENDING",
-      })),
-      skipDuplicates: true,
-    });
+    // Create or update product records
+    // Use upsert to handle products that may already exist from previous scans
+    await Promise.all(
+      products.map((p) =>
+        prisma.product.upsert({
+          where: { id: p.id },
+          create: {
+            id: p.id,
+            jobId: job.id,
+            title: p.title,
+            imageUrl: p.imageUrl,
+            currentCategory: p.category,
+            currentTags: p.tags.join(", "),
+            status: "PENDING",
+          },
+          update: {
+            jobId: job.id,
+            title: p.title,
+            imageUrl: p.imageUrl,
+            currentCategory: p.category,
+            currentTags: p.tags.join(", "),
+            status: "PENDING",
+            suggestedMetafields: Prisma.JsonNull,
+            suggestedTags: Prisma.JsonNull,
+            syncedAt: null,
+            error: null,
+          },
+        })
+      )
+    );
 
     // Queue for processing
     await queueBulkAnalysis(
