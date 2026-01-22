@@ -203,8 +203,9 @@ export default function Dashboard() {
         </button>
       </TitleBar>
 
-      <BlockStack gap="500">
-        {billing.plan === "FREE" && billing.creditsRemaining < 10 && (
+      <Box paddingBlockEnd="800">
+        <BlockStack gap="500">
+          {billing.plan === "FREE" && billing.creditsRemaining < 10 && (
           <Banner
             title="Running low on credits"
             tone="warning"
@@ -367,7 +368,8 @@ export default function Dashboard() {
             </Card>
           </Layout.Section>
         </Layout>
-      </BlockStack>
+        </BlockStack>
+      </Box>
     </Page>
   );
 }

@@ -91,8 +91,9 @@ export default function Billing() {
     >
       <TitleBar title="Billing" />
 
-      <BlockStack gap="500">
-        {/* Current Plan */}
+      <Box paddingBlockEnd="800">
+        <BlockStack gap="500">
+          {/* Current Plan */}
         <Card>
           <BlockStack gap="400">
             <InlineStack align="space-between">
@@ -258,7 +259,8 @@ export default function Billing() {
             </BlockStack>
           </BlockStack>
         </Card>
-      </BlockStack>
+        </BlockStack>
+      </Box>
     </Page>
   );
 }

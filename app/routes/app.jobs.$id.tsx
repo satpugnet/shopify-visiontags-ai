@@ -313,8 +313,9 @@ export default function JobDetail() {
     >
       <TitleBar title="Job Details" />
 
-      <BlockStack gap="500">
-        {/* Job Status Card */}
+      <Box paddingBlockEnd="800">
+        <BlockStack gap="500">
+          {/* Job Status Card */}
         <Card>
           <BlockStack gap="400">
             <InlineStack align="space-between">
@@ -494,7 +495,8 @@ export default function JobDetail() {
             </Card>
           );
         })}
-      </BlockStack>
+        </BlockStack>
+      </Box>
     </Page>
   );
 }
