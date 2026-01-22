@@ -8,7 +8,7 @@ Shopify app that uses Claude Vision to auto-fill BOTH metafields AND tags from p
 - [x] Phase 2: Database schema (Prisma/PostgreSQL)
 - [x] Phase 3: Core services (vision, metafields, queue, products, billing)
 - [x] Phase 4: UI routes (dashboard, job detail, webhooks)
-- [ ] Phase 5: Deployment (Railway)
+- [x] Phase 5: Deployment (Railway) - Live at shopify-visiontags-ai-production.up.railway.app
 - [ ] Phase 6: App Store submission
 
 ## External Accounts & Links
@@ -77,12 +77,11 @@ app/
 ## Current Progress
 
 **Last updated**: January 2025
-**Current phase**: Phase 4 Complete - Ready for Phase 5 (Deployment)
+**Current phase**: Phase 5 Complete - Ready for Phase 6 (App Store Submission)
 **Next steps**:
-1. Create Railway account and project
-2. Deploy app to Railway
-3. Create app in Shopify Partner Dashboard
-4. Connect deployed app to Shopify
+1. Prepare app listing (description, screenshots, pricing)
+2. Create privacy policy page
+3. Submit to Shopify App Store for review
 
 ## Development Commands
 
@@ -106,6 +105,10 @@ railway up
 ## Known Issues / Blockers
 
 - None currently
+
+## Resolved Issues
+
+- Fixed: Metafield sync failing due to reserved 'shopify' namespace (changed to 'custom')
 
 ## Notes
 
