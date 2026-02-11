@@ -92,6 +92,11 @@ function stripMarkdownCodeBlocks(text: string): string {
  * This reduces tokens and bandwidth
  */
 function optimizeImageUrl(imageUrl: string): string {
+  // Only apply size optimization to Shopify CDN URLs
+  if (!imageUrl.includes("cdn.shopify.com")) {
+    return imageUrl;
+  }
+
   // Shopify CDN supports size suffixes like _800x800
   // Insert before the file extension
   const urlWithoutParams = imageUrl.split("?")[0];
@@ -127,7 +132,7 @@ export async function analyzeProductImage(
     const optimizedUrl = optimizeImageUrl(imageUrl);
 
     const response = await anthropic.messages.create({
-      model: "claude-haiku-4-5-20250514",
+      model: "claude-haiku-4-5-20251001",
       max_tokens: 512,
       messages: [
         {
@@ -180,6 +185,28 @@ export async function analyzeProductImage(
     }
   } catch (error) {
     console.error("Vision API error:", error);
+
+    if (error instanceof Anthropic.AuthenticationError) {
+      return {
+        error: "Anthropic API authentication failed - check API key",
+        code: "API_ERROR",
+      };
+    }
+
+    if (error instanceof Anthropic.RateLimitError) {
+      return {
+        error: "Anthropic API rate limit exceeded - try again later",
+        code: "API_ERROR",
+      };
+    }
+
+    if (error instanceof Anthropic.APIError) {
+      return {
+        error: `Anthropic API error (${error.status}): ${error.message}`,
+        code: "API_ERROR",
+      };
+    }
+
     return {
       error: error instanceof Error ? error.message : "Unknown error",
       code: "API_ERROR",

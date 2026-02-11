@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { PLANS } from "../billing.server";
+import { PLANS, getPlanPickerUrl } from "../billing.server";
 
 describe("PLANS configuration", () => {
   describe("FREE plan", () => {
@@ -27,7 +27,7 @@ describe("PLANS configuration", () => {
 
   describe("PRO plan", () => {
     it("should have correct credit limit", () => {
-      expect(PLANS.PRO.credits).toBe(2000);
+      expect(PLANS.PRO.credits).toBe(5000);
     });
 
     it("should cost $19/month", () => {
@@ -35,7 +35,7 @@ describe("PLANS configuration", () => {
     });
 
     it("should have all pro features", () => {
-      expect(PLANS.PRO.features).toContain("2,000 AI scans/month");
+      expect(PLANS.PRO.features).toContain("5,000 AI scans/month");
       expect(PLANS.PRO.features).toContain("All metafields");
       expect(PLANS.PRO.features).toContain("SEO tags");
       expect(PLANS.PRO.features).toContain("Auto-sync new products");
@@ -100,6 +100,19 @@ describe("Credit calculations (unit logic)", () => {
     const requiredCredits = 50;
 
     expect(creditsRemaining >= requiredCredits).toBe(true);
+  });
+});
+
+describe("getPlanPickerUrl", () => {
+  it("should construct correct URL from shop domain", () => {
+    const url = getPlanPickerUrl("cool-store.myshopify.com");
+    expect(url).toContain("https://admin.shopify.com/store/cool-store/charges/");
+    expect(url).toContain("/pricing_plans");
+  });
+
+  it("should extract store handle correctly", () => {
+    const url = getPlanPickerUrl("my-test-shop.myshopify.com");
+    expect(url).toContain("/store/my-test-shop/");
   });
 });
 

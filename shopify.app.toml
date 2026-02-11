@@ -3,6 +3,7 @@
 
 client_id = "82198424193060d95d80f7b9e011c21b"
 name = "VisionTags"
+handle = "visiontags"
 application_url = "https://visiontags-ai-production.up.railway.app"
 embedded = true
 
@@ -30,6 +31,12 @@ api_version = "2025-01"
   [[webhooks.subscriptions]]
   topics = ["products/create"]
   uri = "/webhooks/products/create"
+
+  # Handled by: /app/routes/webhooks.app-subscriptions.update.tsx
+  # Sync plan status when merchant changes subscription (Managed Pricing)
+  [[webhooks.subscriptions]]
+  topics = ["app_subscriptions/update"]
+  uri = "/webhooks/app-subscriptions/update"
 
   # Webhooks can have filters
   # Only receive webhooks for product updates with a product price >= 10.00

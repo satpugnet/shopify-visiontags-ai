@@ -1,7 +1,6 @@
-import { useEffect } from "react";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
-import { useLoaderData, useFetcher, useNavigate } from "@remix-run/react";
+import type { LoaderFunctionArgs } from "@remix-run/node";
+import { json } from "@remix-run/node";
+import { useLoaderData, useNavigate } from "@remix-run/react";
 import {
   Page,
   Layout,
@@ -16,68 +15,39 @@ import {
   Divider,
   Banner,
 } from "@shopify/polaris";
-import { TitleBar, useAppBridge } from "@shopify/app-bridge-react";
+import { TitleBar } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 import {
   getShopBilling,
-  createProSubscription,
+  syncPlanFromShopify,
+  getPlanPickerUrl,
   PLANS,
 } from "../services/billing.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
+  const { admin, session } = await authenticate.admin(request);
   const shop = session.shop;
 
+  // Sync plan status from Shopify before displaying
+  await syncPlanFromShopify(admin, shop);
+
   const billing = await getShopBilling(shop);
+  const planPickerUrl = getPlanPickerUrl(shop);
 
   return json({
     shop,
     billing,
     plans: PLANS,
+    planPickerUrl,
   });
 };
 
-export const action = async ({ request }: ActionFunctionArgs) => {
-  const { admin, session } = await authenticate.admin(request);
-  const shop = session.shop;
-  const formData = await request.formData();
-  const action = formData.get("action");
-
-  if (action === "upgrade") {
-    const result = await createProSubscription(admin, shop);
-
-    if ("error" in result) {
-      return json({ success: false, error: result.error });
-    }
-
-    // Redirect to Shopify's confirmation page
-    return redirect(result.confirmationUrl);
-  }
-
-  return json({ success: false, error: "Unknown action" });
-};
-
-type ActionData = {
-  success: boolean;
-  error?: string;
-};
-
 export default function Billing() {
-  const { billing, plans } = useLoaderData<typeof loader>();
-  const fetcher = useFetcher<ActionData>();
+  const { billing, plans, planPickerUrl } = useLoaderData<typeof loader>();
   const navigate = useNavigate();
-  const shopify = useAppBridge();
 
-  const isUpgrading = fetcher.state === "submitting";
-
-  useEffect(() => {
-    if (fetcher.data?.error) {
-      shopify.toast.show(fetcher.data.error, { isError: true });
-    }
-  }, [fetcher.data, shopify]);
-
-  const handleUpgrade = () => {
-    fetcher.submit({ action: "upgrade" }, { method: "POST" });
+  const handleManagePlan = () => {
+    window.open(planPickerUrl, "_top");
   };
 
   const creditPercentage = Math.round(
@@ -149,6 +119,10 @@ export default function Billing() {
                 </BlockStack>
               )}
             </BlockStack>
+
+            <Button onClick={handleManagePlan}>
+              Manage Plan
+            </Button>
           </BlockStack>
         </Card>
 
@@ -159,12 +133,11 @@ export default function Billing() {
             tone="info"
             action={{
               content: "Upgrade Now",
-              onAction: handleUpgrade,
-              loading: isUpgrading,
+              onAction: handleManagePlan,
             }}
           >
             <p>
-              Get 2,000 AI scans per month, auto-sync for new products, and
+              Get 5,000 AI scans per month, auto-sync for new products, and
               priority support.
             </p>
           </Banner>
@@ -232,8 +205,7 @@ export default function Billing() {
                 ) : (
                   <Button
                     variant="primary"
-                    onClick={handleUpgrade}
-                    loading={isUpgrading}
+                    onClick={handleManagePlan}
                   >
                     Upgrade to Pro
                   </Button>

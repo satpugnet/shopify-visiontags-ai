@@ -21,17 +21,28 @@ import { TitleBar, useAppBridge } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { countProducts } from "../services/products.server";
-import { getShopBilling, PLANS } from "../services/billing.server";
+import {
+  getShopBilling,
+  syncPlanFromShopify,
+  getPlanPickerUrl,
+  PLANS,
+} from "../services/billing.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
   const shop = session.shop;
+
+  // Sync plan status from Shopify (Managed Pricing)
+  await syncPlanFromShopify(admin, shop);
 
   // Get product count
   const productCount = await countProducts(admin);
 
   // Get billing info
   const billing = await getShopBilling(shop);
+
+  // Get plan picker URL for upgrade buttons
+  const planPickerUrl = getPlanPickerUrl(shop);
 
   // Get recent jobs
   const jobs = await prisma.job.findMany({
@@ -51,6 +62,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     billing,
     proFeatures: PLANS.PRO.features,
     proPrice: PLANS.PRO.price,
+    planPickerUrl,
     jobs: jobs.map((job) => ({
       id: job.id,
       status: job.status,
@@ -92,7 +104,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       const billing = await getShopBilling(shop);
       const errorMessage = billing.plan === "PRO"
         ? "Credit limit reached and overage cap hit. Credits will reset at the start of your next billing cycle."
-        : "Not enough credits. Upgrade to Pro for 2,000 credits/month.";
+        : "Not enough credits. Upgrade to Pro for 5,000 credits/month.";
       return json({
         error: errorMessage,
         success: false,
@@ -154,7 +166,7 @@ type ActionData = {
 };
 
 export default function Dashboard() {
-  const { shop, productCount, billing, jobs, proFeatures, proPrice } = useLoaderData<typeof loader>();
+  const { shop, productCount, billing, jobs, proFeatures, proPrice, planPickerUrl } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<ActionData>();
   const shopify = useAppBridge();
 
@@ -213,11 +225,11 @@ export default function Dashboard() {
           <Banner
             title="Running low on credits"
             tone="warning"
-            action={{ content: "Upgrade to Pro", url: "/app/billing" }}
+            action={{ content: "Upgrade to Pro", onAction: () => window.open(planPickerUrl, "_top") }}
           >
             <p>
               You have {billing.creditsRemaining} credits remaining this month.
-              Upgrade to Pro for 2,000 credits/month.
+              Upgrade to Pro for 5,000 credits/month.
             </p>
           </Banner>
         )}
@@ -285,7 +297,7 @@ export default function Dashboard() {
                     Start AI Scan
                   </Button>
                   {billing.plan === "FREE" && (
-                    <Button url="/app/billing">Upgrade to Pro</Button>
+                    <Button onClick={() => window.open(planPickerUrl, "_top")}>Upgrade to Pro</Button>
                   )}
                 </InlineStack>
               </BlockStack>
@@ -376,7 +388,7 @@ export default function Dashboard() {
                   ))}
                 </BlockStack>
                 {billing.plan === "FREE" && (
-                  <Button url="/app/billing">
+                  <Button onClick={() => window.open(planPickerUrl, "_top")}>
                     {`Upgrade for $${proPrice}/month`}
                   </Button>
                 )}

@@ -274,88 +274,21 @@ export async function toggleAutoSync(
 }
 
 /**
- * Create a Shopify recurring charge for Pro plan
+ * Sync the shop's plan status from Shopify's active subscriptions.
+ * Used with Managed Pricing — the app does not create subscriptions itself.
  */
-export async function createProSubscription(
+export async function syncPlanFromShopify(
   admin: AdminApiContext,
   shop: string
-): Promise<{ confirmationUrl: string } | { error: string }> {
+): Promise<{ plan: PlanType; synced: boolean }> {
   try {
     const response = await admin.graphql(
       `#graphql
-      mutation createSubscription($name: String!, $lineItems: [AppSubscriptionLineItemInput!]!, $returnUrl: URL!) {
-        appSubscriptionCreate(
-          name: $name
-          returnUrl: $returnUrl
-          lineItems: $lineItems
-        ) {
-          appSubscription {
-            id
-          }
-          confirmationUrl
-          userErrors {
-            field
-            message
-          }
-        }
-      }`,
-      {
-        variables: {
-          name: "VisionTags Pro",
-          returnUrl: `${process.env.SHOPIFY_APP_URL}/app?billing=success`,
-          lineItems: [
-            {
-              plan: {
-                appRecurringPricingDetails: {
-                  price: {
-                    amount: PLANS.PRO.price,
-                    currencyCode: "USD",
-                  },
-                  interval: "EVERY_30_DAYS",
-                },
-              },
-            },
-          ],
-        },
-      }
-    );
-
-    const data = await response.json();
-
-    if (data.data?.appSubscriptionCreate?.userErrors?.length > 0) {
-      const errors = data.data.appSubscriptionCreate.userErrors
-        .map((e: { message: string }) => e.message)
-        .join(", ");
-      return { error: errors };
-    }
-
-    const confirmationUrl = data.data?.appSubscriptionCreate?.confirmationUrl;
-    if (!confirmationUrl) {
-      return { error: "No confirmation URL returned" };
-    }
-
-    return { confirmationUrl };
-  } catch (error) {
-    console.error("Error creating subscription:", error);
-    return {
-      error: error instanceof Error ? error.message : "Unknown error",
-    };
-  }
-}
-
-/**
- * Check if shop has an active subscription
- */
-export async function hasActiveSubscription(
-  admin: AdminApiContext
-): Promise<boolean> {
-  try {
-    const response = await admin.graphql(
-      `#graphql
-      query getActiveSubscription {
-        appInstallation {
+      query getActiveSubscriptions {
+        currentAppInstallation {
           activeSubscriptions {
             id
+            name
             status
           }
         }
@@ -364,13 +297,37 @@ export async function hasActiveSubscription(
 
     const data = await response.json();
     const subscriptions =
-      data.data?.appInstallation?.activeSubscriptions || [];
+      data.data?.currentAppInstallation?.activeSubscriptions || [];
 
-    return subscriptions.some(
+    const hasActive = subscriptions.some(
       (sub: { status: string }) => sub.status === "ACTIVE"
     );
+
+    const settings = await getOrCreateShopSettings(shop);
+    const currentPlan = settings.plan as PlanType;
+
+    if (hasActive && currentPlan !== "PRO") {
+      await upgradeToProPlan(shop);
+      return { plan: "PRO", synced: true };
+    } else if (!hasActive && currentPlan !== "FREE") {
+      await downgradeToFreePlan(shop);
+      return { plan: "FREE", synced: true };
+    }
+
+    return { plan: currentPlan, synced: false };
   } catch (error) {
-    console.error("Error checking subscription:", error);
-    return false;
+    console.error("Error syncing plan from Shopify:", error);
+    const settings = await getOrCreateShopSettings(shop);
+    return { plan: settings.plan as PlanType, synced: false };
   }
+}
+
+/**
+ * Get the URL to Shopify's hosted plan picker page.
+ * Used with Managed Pricing — redirects merchant to Shopify's plan selection UI.
+ */
+export function getPlanPickerUrl(shop: string): string {
+  const storeHandle = shop.replace(".myshopify.com", "");
+  const appHandle = process.env.SHOPIFY_APP_HANDLE || "visiontags";
+  return `https://admin.shopify.com/store/${storeHandle}/charges/${appHandle}/pricing_plans`;
 }

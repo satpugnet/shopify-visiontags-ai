@@ -351,6 +351,31 @@ export default function JobDetail() {
           </BlockStack>
         </Card>
 
+        {/* Error Summary */}
+        {products.filter((p) => p.status === "ERROR").length > 0 && (
+          <Banner
+            title={`${products.filter((p) => p.status === "ERROR").length} product(s) failed to scan`}
+            tone="critical"
+          >
+            <BlockStack gap="100">
+              {products
+                .filter((p) => p.status === "ERROR")
+                .slice(0, 3)
+                .map((p) => (
+                  <Text as="p" variant="bodySm" key={p.id}>
+                    {p.title}: {p.error || "Unknown error"}
+                  </Text>
+                ))}
+              {products.filter((p) => p.status === "ERROR").length > 3 && (
+                <Text as="p" variant="bodySm" tone="subdued">
+                  And {products.filter((p) => p.status === "ERROR").length - 3}{" "}
+                  more...
+                </Text>
+              )}
+            </BlockStack>
+          </Banner>
+        )}
+
         {/* Sync Options */}
         {analyzedProducts.length > 0 && (
           <Card>

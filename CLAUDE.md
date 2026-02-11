@@ -40,13 +40,14 @@ Shopify app that uses Claude Vision to auto-fill BOTH metafields AND tags from p
 - [ ] SHOPIFY_API_SECRET - From Partner Dashboard
 - [ ] SHOPIFY_APP_URL - Your app's public URL
 - [ ] SCOPES - read_products,write_products
+- [ ] SHOPIFY_APP_HANDLE - App handle for Managed Pricing URLs (e.g., "visiontags")
 
 ## Tech Stack
 
 - **Framework**: Remix (Shopify App Template)
 - **Database**: PostgreSQL (via Prisma)
 - **Queue**: BullMQ + Redis
-- **AI**: Claude Haiku 4.5 (claude-haiku-4-5-20250514)
+- **AI**: Claude Haiku 4.5 (claude-haiku-4-5-20251001)
 - **UI**: Polaris + App Bridge
 - **Deployment**: Railway (recommended)
 
@@ -81,12 +82,14 @@ app/
 
 ## Current Progress
 
-**Last updated**: January 2025
-**Current phase**: Phase 5 Complete - Ready for Phase 6 (App Store Submission)
+**Last updated**: February 2026
+**Current phase**: Phase 6 - App Store Submission (in review, fixing feedback)
+**Billing**: Uses Shopify Managed Pricing (plans configured in Partner Dashboard, NOT in code)
 **Next steps**:
-1. Prepare app listing (description, screenshots, pricing)
-2. Create privacy policy page
-3. Submit to Shopify App Store for review
+1. Deploy fixes for review feedback (billing + scan errors)
+2. Set SHOPIFY_APP_HANDLE env var in Railway
+3. Verify app handle in Partner Dashboard matches config
+4. Reply to Shopify review email (Ref: 101137)
 
 ## Development Commands
 
@@ -114,10 +117,15 @@ railway up
 ## Resolved Issues
 
 - Fixed: Metafield sync failing due to reserved 'shopify' namespace (changed to 'custom')
+- Fixed: Billing API conflict with Managed Pricing (switched to Shopify's hosted plan picker)
+- Fixed: AI scans failing due to deprecated model ID (updated to claude-haiku-4-5-20251001)
+- Fixed: Image URL optimization breaking non-Shopify CDN URLs (added domain check)
 
 ## Notes
 
-- Image optimization: We append `_800x800` to Shopify CDN URLs to save Claude API tokens
+- Image optimization: We append `_800x800` to Shopify CDN URLs (only cdn.shopify.com) to save Claude API tokens
 - Credit system prevents API cost overruns
 - Auto-sync (products/create webhook) is a Pro-only feature
+- Billing uses Managed Pricing: plans defined in Partner Dashboard, upgrade redirects to Shopify's hosted plan picker
+- app_subscriptions/update webhook syncs plan changes to local DB
 - V1 simplifications: No revert button, no settings page, basic taxonomy validation
