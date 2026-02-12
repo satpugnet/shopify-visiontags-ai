@@ -154,8 +154,8 @@ export async function updateProductTags(
 
     const response = await admin.graphql(
       `#graphql
-      mutation productUpdate($input: ProductInput!) {
-        productUpdate(input: $input) {
+      mutation productUpdate($product: ProductUpdateInput!) {
+        productUpdate(product: $product) {
           product {
             id
             tags
@@ -168,7 +168,7 @@ export async function updateProductTags(
       }`,
       {
         variables: {
-          input: {
+          product: {
             id: productId,
             tags,
           },
@@ -289,4 +289,119 @@ export async function fetchCollectionProducts(
   }
 
   return products;
+}
+
+interface ProductUpdateMediaResponse {
+  data?: {
+    productUpdateMedia?: {
+      media?: Array<{
+        id: string;
+        alt: string | null;
+      }>;
+      mediaUserErrors?: Array<{
+        field: string[];
+        message: string;
+      }>;
+    };
+  };
+}
+
+interface ProductMediaQueryResponse {
+  data?: {
+    product?: {
+      media?: {
+        nodes: Array<{
+          id: string;
+          mediaContentType: string;
+          alt: string | null;
+        }>;
+      };
+    };
+  };
+}
+
+/**
+ * Update alt text for a product's first image
+ */
+export async function updateProductImageAlt(
+  admin: AdminApiContext,
+  productId: string,
+  altText: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    // First, get the product's first image media ID
+    const mediaResponse = await admin.graphql(
+      `#graphql
+      query getProductMedia($id: ID!) {
+        product(id: $id) {
+          media(first: 1) {
+            nodes {
+              id
+              mediaContentType
+              alt
+            }
+          }
+        }
+      }`,
+      {
+        variables: { id: productId },
+      }
+    );
+
+    const mediaData = (await mediaResponse.json()) as ProductMediaQueryResponse;
+    const mediaNodes = mediaData.data?.product?.media?.nodes || [];
+
+    if (mediaNodes.length === 0) {
+      return { success: false, error: "No media found for product" };
+    }
+
+    const mediaId = mediaNodes[0].id;
+    console.log(`[VisionTags] Updating alt text for media ${mediaId} on product ${productId}`);
+
+    // Update the media alt text using productUpdateMedia mutation
+    const response = await admin.graphql(
+      `#graphql
+      mutation productUpdateMedia($productId: ID!, $media: [UpdateMediaInput!]!) {
+        productUpdateMedia(productId: $productId, media: $media) {
+          media {
+            alt
+          }
+          mediaUserErrors {
+            field
+            message
+          }
+        }
+      }`,
+      {
+        variables: {
+          productId,
+          media: [
+            {
+              id: mediaId,
+              alt: altText,
+            },
+          ],
+        },
+      }
+    );
+
+    const data = (await response.json()) as ProductUpdateMediaResponse;
+
+    if (data.data?.productUpdateMedia?.mediaUserErrors?.length) {
+      const errors = data.data.productUpdateMedia.mediaUserErrors
+        .map((e) => e.message)
+        .join(", ");
+      console.error(`[VisionTags] Alt text error for ${productId}:`, errors);
+      return { success: false, error: errors };
+    }
+
+    console.log(`[VisionTags] Alt text updated for ${productId}`);
+    return { success: true };
+  } catch (error) {
+    console.error(`[VisionTags] Error updating alt text for ${productId}:`, error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Unknown error",
+    };
+  }
 }

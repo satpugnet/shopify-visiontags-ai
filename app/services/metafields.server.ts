@@ -163,9 +163,10 @@ export async function updateProductMetafields(
 
     console.log(`[Metafields] API response for ${productId}:`, JSON.stringify(data, null, 2));
 
-    if (data.data?.metafieldsSet?.userErrors?.length > 0) {
-      const errors = data.data.metafieldsSet.userErrors
-        .map((e: { message: string; code?: string }) => `${e.message}${e.code ? ` (${e.code})` : ''}`)
+    const userErrors = data.data?.metafieldsSet?.userErrors;
+    if (userErrors && userErrors.length > 0) {
+      const errors = userErrors
+        .map((e: { message: string; code?: string | null }) => `${e.message}${e.code ? ` (${e.code})` : ''}`)
         .join(", ");
       console.error(`[Metafields] Error for ${productId}:`, errors);
       return { success: false, error: errors };
