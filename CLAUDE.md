@@ -75,6 +75,9 @@ app/
 | Free  | $0      | 50         | Basic scan |
 | Pro   | $19/mo  | 5,000      | Auto-sync, all features |
 
+Hard cap at plan limit — no overage. Credits reset each billing cycle.
+Uses Shopify Managed Pricing (fixed recurring only, no usage-based billing).
+
 ### Cost Analysis (Claude Haiku 4.5)
 - Cost per scan: ~$0.003
 - Free (50 scans): ~$0.15 cost (acquisition)

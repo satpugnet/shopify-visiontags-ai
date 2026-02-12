@@ -75,12 +75,11 @@ VisionTags uses advanced AI vision to analyze your product images and automatica
 - Perfect for trying out VisionTags
 
 ### Pro Plan - $19/month
-- 2,000 AI scans per month
+- 5,000 AI scans per month
 - All metafield types
 - Advanced SEO tags
 - Auto-sync for new products
 - Priority support
-- Pay-as-you-go overage ($0.01/scan after limit)
 
 ---
 

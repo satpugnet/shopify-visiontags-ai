@@ -38,8 +38,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   // Check credits
-  const hasCredits = await hasAvailableCredits(shop);
-  if (!hasCredits) {
+  const creditCheck = await hasAvailableCredits(shop);
+  if (!creditCheck.allowed) {
     console.log(`Shop ${shop} has no credits, skipping auto-sync`);
     return new Response();
   }

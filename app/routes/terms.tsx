@@ -67,7 +67,7 @@ export default function TermsOfService() {
         <li>All metafields and SEO tags</li>
         <li>Auto-sync for new products</li>
         <li>Priority support</li>
-        <li>Pay-as-you-go overage ($0.005/scan, up to $25/month cap)</li>
+        <li>Hard cap at plan limit — credits reset each billing cycle</li>
       </ul>
 
       <h3>Billing Terms</h3>
