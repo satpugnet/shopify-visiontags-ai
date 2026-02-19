@@ -1,46 +1,59 @@
 /**
  * Health Check Endpoint
  * Used by Railway and other monitoring services
+ * Checks database and Redis connectivity
  */
 
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import prisma from "../db.server";
+import Redis from "ioredis";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
+  const checks: Record<string, string> = {};
+  let isHealthy = true;
+
+  // Check database connectivity
   try {
-    // Check database connectivity
     await prisma.$queryRaw`SELECT 1`;
-
-    return new Response(
-      JSON.stringify({
-        status: "healthy",
-        timestamp: new Date().toISOString(),
-        checks: {
-          database: "ok",
-        },
-      }),
-      {
-        status: 200,
-        headers: {
-          "Content-Type": "application/json",
-        },
-      }
-    );
+    checks.database = "ok";
   } catch (error) {
-    console.error("[VisionTags] Health check failed:", error);
-
-    return new Response(
-      JSON.stringify({
-        status: "unhealthy",
-        timestamp: new Date().toISOString(),
-        error: error instanceof Error ? error.message : "Unknown error",
-      }),
-      {
-        status: 503,
-        headers: {
-          "Content-Type": "application/json",
-        },
-      }
-    );
+    console.error("[VisionTags] Health check - database failed:", error);
+    checks.database = "error";
+    isHealthy = false;
   }
+
+  // Check Redis connectivity (required for queue processing)
+  try {
+    const redisUrl = process.env.REDIS_URL;
+    if (redisUrl) {
+      const redis = new Redis(redisUrl, { lazyConnect: true, connectTimeout: 5000 });
+      await redis.ping();
+      await redis.quit();
+      checks.redis = "ok";
+    } else {
+      checks.redis = "not_configured";
+    }
+  } catch (error) {
+    console.error("[VisionTags] Health check - redis failed:", error);
+    checks.redis = "error";
+    // Redis down = queue dead, but app still serves pages
+    // Mark as degraded, not unhealthy
+  }
+
+  const status = isHealthy ? (checks.redis === "ok" ? "healthy" : "degraded") : "unhealthy";
+  const statusCode = isHealthy ? 200 : 503;
+
+  return new Response(
+    JSON.stringify({
+      status,
+      timestamp: new Date().toISOString(),
+      checks,
+    }),
+    {
+      status: statusCode,
+      headers: {
+        "Content-Type": "application/json",
+      },
+    }
+  );
 };

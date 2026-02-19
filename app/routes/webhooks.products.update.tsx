@@ -80,7 +80,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     // Create product record
     await prisma.product.create({
       data: {
-        id: `${productId}-${Date.now()}`, // Unique ID for re-analysis
+        id: `${productId}-${crypto.randomUUID()}`, // Unique ID for re-analysis
         jobId: job.id,
         title: productData.title,
         imageUrl: imageUrl,

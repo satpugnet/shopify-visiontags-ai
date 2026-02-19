@@ -12,11 +12,27 @@ vi.mock("../../db.server", () => ({
   default: mocks.prisma,
 }));
 
+// Mock ioredis
+const mockRedisInstance = vi.hoisted(() => ({
+  ping: vi.fn().mockResolvedValue("PONG"),
+  quit: vi.fn().mockResolvedValue("OK"),
+}));
+
+vi.mock("ioredis", () => {
+  // ioredis uses module.exports = Redis, so the default import maps to this
+  function MockRedis() {
+    return mockRedisInstance;
+  }
+  MockRedis.prototype = {};
+  return { default: MockRedis };
+});
+
 // Import after mocking
 import { loader } from "../health";
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.stubEnv("REDIS_URL", "redis://localhost:6379");
 });
 
 describe("health route", () => {
@@ -26,7 +42,7 @@ describe("health route", () => {
     });
   }
 
-  it("should return healthy status when database is connected", async () => {
+  it("should return healthy status when database and redis are connected", async () => {
     mocks.prisma.$queryRaw.mockResolvedValue([{ "?column?": 1 }]);
 
     const response = await loader({ request: createMockRequest() } as any);
@@ -35,6 +51,7 @@ describe("health route", () => {
     expect(response.status).toBe(200);
     expect(data.status).toBe("healthy");
     expect(data.checks.database).toBe("ok");
+    expect(data.checks.redis).toBe("ok");
     expect(data.timestamp).toBeDefined();
   });
 
@@ -46,7 +63,7 @@ describe("health route", () => {
 
     expect(response.status).toBe(503);
     expect(data.status).toBe("unhealthy");
-    expect(data.error).toBe("Connection refused");
+    expect(data.checks.database).toBe("error");
     expect(data.timestamp).toBeDefined();
   });
 
@@ -69,15 +86,17 @@ describe("health route", () => {
     expect(timestamp.toISOString()).toBe(data.timestamp);
   });
 
-  it("should handle unknown error types gracefully", async () => {
-    mocks.prisma.$queryRaw.mockRejectedValue("Non-Error object");
+  it("should return degraded when DB is ok but redis is not configured", async () => {
+    vi.stubEnv("REDIS_URL", "");
+    mocks.prisma.$queryRaw.mockResolvedValue([{ "?column?": 1 }]);
 
     const response = await loader({ request: createMockRequest() } as any);
     const data = await response.json();
 
-    expect(response.status).toBe(503);
-    expect(data.status).toBe("unhealthy");
-    expect(data.error).toBe("Unknown error");
+    expect(response.status).toBe(200);
+    expect(data.status).toBe("degraded");
+    expect(data.checks.database).toBe("ok");
+    expect(data.checks.redis).toBe("not_configured");
   });
 
   it("should call $queryRaw with SELECT 1", async () => {

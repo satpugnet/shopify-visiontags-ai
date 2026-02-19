@@ -144,8 +144,9 @@ export async function fetchAllProducts(
     const products: ProductWithImage[] = [];
     let hasNextPage = true;
     let cursor: string | null = null;
+    const MAX_PAGES = 100; // Safety guard: max 100 pages × 50 = 5000 products
 
-    while (hasNextPage && products.length < limit) {
+    for (let page = 0; hasNextPage && products.length < limit && page < MAX_PAGES; page++) {
       // Wrap GraphQL call with retry logic for rate limits
       const response = await withRetry(
         () =>
@@ -186,6 +187,9 @@ export async function fetchAllProducts(
       const data = (await response.json()) as ProductsQueryResponse;
       const edges: ProductEdge[] = data.data?.products?.edges || [];
       const pageInfo = data.data?.products?.pageInfo;
+
+      // Break if no edges returned (prevents infinite loop)
+      if (edges.length === 0) break;
 
       for (const edge of edges) {
         const product = edge.node as ShopifyProduct;
@@ -356,8 +360,9 @@ export async function fetchCollectionProducts(
     const products: ProductWithImage[] = [];
     let hasNextPage = true;
     let cursor: string | null = null;
+    const MAX_PAGES = 100; // Safety guard against infinite loops
 
-    while (hasNextPage && products.length < limit) {
+    for (let page = 0; hasNextPage && products.length < limit && page < MAX_PAGES; page++) {
       const response = await admin.graphql(
         `#graphql
         query getCollectionProducts($id: ID!, $first: Int!, $after: String) {
@@ -396,6 +401,9 @@ export async function fetchCollectionProducts(
       const data = (await response.json()) as CollectionProductsResponse;
       const edges: ProductEdge[] = data.data?.collection?.products?.edges || [];
       const pageInfo = data.data?.collection?.products?.pageInfo;
+
+      // Break if no edges returned (prevents infinite loop)
+      if (edges.length === 0) break;
 
       for (const edge of edges) {
         const product = edge.node as ShopifyProduct;

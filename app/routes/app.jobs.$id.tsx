@@ -83,7 +83,14 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     const syncTags = formData.get("syncTags") === "true";
     const syncAltText = formData.get("syncAltText") === "true";
     const editsJson = formData.get("edits") as string;
-    const edits = editsJson ? JSON.parse(editsJson) : {};
+    let edits: Record<string, unknown> = {};
+    if (editsJson) {
+      try {
+        edits = JSON.parse(editsJson);
+      } catch {
+        return json({ error: "Invalid edits data", success: false });
+      }
+    }
 
     if (productIds.length === 0) {
       return json({ error: "No products selected", success: false });

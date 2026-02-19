@@ -217,7 +217,7 @@ export function startAnalysisWorker(): Worker<AnalysisJobData> {
   });
 
   analysisWorker.on("failed", (job, err) => {
-    console.error(`Job ${job?.id} failed:`, err.message);
+    console.error(`[VisionTags] Job ${job?.id} failed:`, err);
   });
 
   console.log("[VisionTags] Analysis worker started");

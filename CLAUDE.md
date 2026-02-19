@@ -9,13 +9,14 @@ Shopify app that uses Claude Vision to auto-fill BOTH metafields AND tags from p
 - [x] Phase 3: Core services (vision, metafields, queue, products, billing)
 - [x] Phase 4: UI routes (dashboard, job detail, webhooks)
 - [x] Phase 5: Deployment (Railway) - Live at visiontags-ai-production.up.railway.app
-- [ ] Phase 6: App Store submission
+- [x] Phase 6: App Store submission - Live on Shopify App Store (Feb 2026)
 
 ## External Accounts & Links
 
 ### Shopify Partner
 - Partner Dashboard: https://partners.shopify.com
 - Partner Account Email: saturnin.13@hotmail.fr
+- Customer-facing Email: marco.a.duval@gmail.com (used for outreach to merchants)
 - App ID: `<TO_BE_FILLED_AFTER_APP_CREATION>`
 - App API Key: (in .env, do not commit)
 - App Secret: (in .env, do not commit)
@@ -85,14 +86,13 @@ Uses Shopify Managed Pricing (fixed recurring only, no usage-based billing).
 
 ## Current Progress
 
-**Last updated**: February 2026
-**Current phase**: Phase 6 - App Store Submission (in review, fixing feedback)
+**Last updated**: Feb 19, 2026
+**Current phase**: Live on Shopify App Store
 **Billing**: Uses Shopify Managed Pricing (plans configured in Partner Dashboard, NOT in code)
+**Active merchants (as of Feb 19, 2026)**: 1 paying (Phoenix Publishing, Pro plan)
 **Next steps**:
-1. Deploy fixes for review feedback (billing + scan errors)
-2. Set SHOPIFY_APP_HANDLE env var in Railway
-3. Verify app handle in Partner Dashboard matches config
-4. Reply to Shopify review email (Ref: 101137)
+1. Grow distribution (App Store SEO, content marketing, direct outreach)
+2. Iterate based on customer feedback
 
 ## Development Commands
 
@@ -123,6 +123,12 @@ railway up
 - Fixed: Billing API conflict with Managed Pricing (switched to Shopify's hosted plan picker)
 - Fixed: AI scans failing due to deprecated model ID (updated to claude-haiku-4-5-20251001)
 - Fixed: Image URL optimization breaking non-Shopify CDN URLs (added domain check)
+
+## Customers
+
+| Store | Email | Plan | Joined | Notes |
+|-------|-------|------|--------|-------|
+| Phoenix Publishing | phoenix.publishing.com@gmail.com | Pro ($19/mo) | Feb 2026 | First paying customer. Applied $5 discount for 1 month. Sent thank-you email from marco.a.duval@gmail.com (Feb 19, 2026) requesting feedback and App Store review. |
 
 ## Notes
 

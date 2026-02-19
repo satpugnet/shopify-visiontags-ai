@@ -82,10 +82,15 @@ export async function getShopBilling(shop: string): Promise<ShopBilling> {
 
   // Auto-reset credits if billing period expired (30 days)
   if (isBillingPeriodExpired(settings.billingPeriodStart)) {
-    console.log(`[VisionTags] Auto-resetting credits for ${shop} (billing period expired)`);
-    await resetCredits(shop);
-    // Re-fetch settings after reset
-    settings = await getOrCreateShopSettings(shop);
+    try {
+      console.log(`[VisionTags] Auto-resetting credits for ${shop} (billing period expired)`);
+      await resetCredits(shop);
+      // Re-fetch settings after reset
+      settings = await getOrCreateShopSettings(shop);
+    } catch (error) {
+      console.error(`[VisionTags] Failed to auto-reset credits for ${shop}:`, error);
+      // Continue with stale data rather than crashing the dashboard
+    }
   }
 
   return {
@@ -110,30 +115,30 @@ export async function hasAvailableCredits(
 }
 
 /**
- * Use credits for a shop
+ * Use credits for a shop (atomic to prevent race conditions)
+ * Uses raw SQL to atomically check and increment in a single query
  */
 export async function useCredits(
   shop: string,
   count: number
 ): Promise<{ success: boolean; remaining: number }> {
-  const settings = await getOrCreateShopSettings(shop);
+  // Atomic: only increments if creditsUsed + count <= creditLimit
+  const updated = await prisma.$executeRawUnsafe(
+    `UPDATE "ShopSettings" SET "creditsUsed" = "creditsUsed" + $1, "updatedAt" = NOW() WHERE shop = $2 AND "creditsUsed" + $1 <= "creditLimit"`,
+    count,
+    shop
+  );
 
-  const newTotal = settings.creditsUsed + count;
-  if (newTotal > settings.creditLimit) {
+  if (updated === 0) {
+    // Either shop doesn't exist or would exceed limit
+    const settings = await getOrCreateShopSettings(shop);
     return {
       success: false,
-      remaining: settings.creditLimit - settings.creditsUsed,
+      remaining: Math.max(0, settings.creditLimit - settings.creditsUsed),
     };
   }
 
-  const updated = await prisma.shopSettings.update({
-    where: { shop },
-    data: {
-      creditsUsed: newTotal,
-    },
-  });
-
-  // Also track in UsageRecord for historical data
+  // Track in UsageRecord for historical data
   const month = new Date().toISOString().slice(0, 7);
   await prisma.usageRecord.upsert({
     where: { shop_month: { shop, month } },
@@ -141,9 +146,11 @@ export async function useCredits(
     update: { count: { increment: count } },
   });
 
+  // Fetch updated settings for remaining count
+  const settings = await getOrCreateShopSettings(shop);
   return {
     success: true,
-    remaining: Math.max(0, updated.creditLimit - updated.creditsUsed),
+    remaining: Math.max(0, settings.creditLimit - settings.creditsUsed),
   };
 }
 

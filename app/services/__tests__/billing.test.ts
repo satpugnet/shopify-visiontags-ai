@@ -6,10 +6,12 @@ const prismaMock = vi.hoisted(() => ({
     findUnique: vi.fn(),
     create: vi.fn(),
     update: vi.fn(),
+    updateMany: vi.fn(),
   },
   usageRecord: {
     upsert: vi.fn(),
   },
+  $executeRawUnsafe: vi.fn(),
 }));
 
 // Mock the module
@@ -28,6 +30,7 @@ import {
   upgradeToProPlan,
   downgradeToFreePlan,
   toggleAutoSync,
+  syncPlanFromShopify,
 } from "../billing.server";
 
 // Test fixtures
@@ -360,9 +363,10 @@ describe("hasAvailableCredits (integration)", () => {
 });
 
 describe("useCredits (integration)", () => {
-  it("should increment credits and return remaining", async () => {
-    prismaMock.shopSettings.findUnique.mockResolvedValue(freeShopSettings as any);
-    prismaMock.shopSettings.update.mockResolvedValue({
+  it("should atomically increment credits and return remaining", async () => {
+    // Atomic update succeeds (1 row updated)
+    prismaMock.$executeRawUnsafe.mockResolvedValue(1);
+    prismaMock.shopSettings.findUnique.mockResolvedValue({
       ...freeShopSettings,
       creditsUsed: 35,
     } as any);
@@ -372,13 +376,16 @@ describe("useCredits (integration)", () => {
 
     expect(result.success).toBe(true);
     expect(result.remaining).toBe(15);
-    expect(prismaMock.shopSettings.update).toHaveBeenCalledWith({
-      where: { shop: "test-shop.myshopify.com" },
-      data: { creditsUsed: 35 },
-    });
+    expect(prismaMock.$executeRawUnsafe).toHaveBeenCalledWith(
+      expect.stringContaining("UPDATE"),
+      5,
+      "test-shop.myshopify.com"
+    );
   });
 
-  it("should reject when exceeds credit limit", async () => {
+  it("should reject when atomic update fails (would exceed limit)", async () => {
+    // Atomic update fails (0 rows updated = would exceed limit)
+    prismaMock.$executeRawUnsafe.mockResolvedValue(0);
     prismaMock.shopSettings.findUnique.mockResolvedValue({
       ...freeShopSettings,
       creditsUsed: 48,
@@ -391,8 +398,8 @@ describe("useCredits (integration)", () => {
   });
 
   it("should track usage in UsageRecord", async () => {
-    prismaMock.shopSettings.findUnique.mockResolvedValue(freeShopSettings as any);
-    prismaMock.shopSettings.update.mockResolvedValue({
+    prismaMock.$executeRawUnsafe.mockResolvedValue(1);
+    prismaMock.shopSettings.findUnique.mockResolvedValue({
       ...freeShopSettings,
       creditsUsed: 35,
     } as any);
@@ -484,5 +491,94 @@ describe("toggleAutoSync (integration)", () => {
     const result = await toggleAutoSync("test-shop.myshopify.com", false);
 
     expect(result.success).toBe(true);
+  });
+});
+
+describe("syncPlanFromShopify (integration)", () => {
+  function createMockAdmin(subscriptions: Array<{ id: string; name: string; status: string }>) {
+    return {
+      graphql: vi.fn().mockResolvedValue({
+        json: vi.fn().mockResolvedValue({
+          data: {
+            currentAppInstallation: {
+              activeSubscriptions: subscriptions,
+            },
+          },
+        }),
+      }),
+    } as any;
+  }
+
+  it("should upgrade to PRO when active subscription exists", async () => {
+    const mockAdmin = createMockAdmin([
+      { id: "gid://shopify/AppSubscription/1", name: "Pro", status: "ACTIVE" },
+    ]);
+    prismaMock.shopSettings.findUnique.mockResolvedValue(freeShopSettings as any);
+    prismaMock.shopSettings.update.mockResolvedValue({} as any);
+
+    const result = await syncPlanFromShopify(mockAdmin, "test-shop.myshopify.com");
+
+    expect(result.plan).toBe("PRO");
+    expect(result.synced).toBe(true);
+    expect(prismaMock.shopSettings.update).toHaveBeenCalledWith({
+      where: { shop: "test-shop.myshopify.com" },
+      data: {
+        plan: "PRO",
+        creditLimit: 5000,
+        creditsUsed: 0,
+        billingPeriodStart: expect.any(Date),
+      },
+    });
+  });
+
+  it("should downgrade to FREE when no active subscriptions", async () => {
+    const mockAdmin = createMockAdmin([]);
+    prismaMock.shopSettings.findUnique.mockResolvedValue(proShopSettings as any);
+    prismaMock.shopSettings.update.mockResolvedValue({} as any);
+
+    const result = await syncPlanFromShopify(mockAdmin, "pro-shop.myshopify.com");
+
+    expect(result.plan).toBe("FREE");
+    expect(result.synced).toBe(true);
+    expect(prismaMock.shopSettings.update).toHaveBeenCalledWith({
+      where: { shop: "pro-shop.myshopify.com" },
+      data: {
+        plan: "FREE",
+        creditLimit: 50,
+        autoSyncNewProducts: false,
+      },
+    });
+  });
+
+  it("should return stale data on GraphQL error", async () => {
+    const mockAdmin = {
+      graphql: vi.fn().mockRejectedValue(new Error("GraphQL network error")),
+    } as any;
+    prismaMock.shopSettings.findUnique.mockResolvedValue(proShopSettings as any);
+
+    const result = await syncPlanFromShopify(mockAdmin, "pro-shop.myshopify.com");
+
+    expect(result.plan).toBe("PRO");
+    expect(result.synced).toBe(false);
+  });
+});
+
+describe("useCredits - atomic double-spend prevention (integration)", () => {
+  it("should call $executeRawUnsafe with correct SQL and params for atomic check", async () => {
+    prismaMock.$executeRawUnsafe.mockResolvedValue(1);
+    prismaMock.shopSettings.findUnique.mockResolvedValue({
+      ...freeShopSettings,
+      creditsUsed: 31,
+    } as any);
+    prismaMock.usageRecord.upsert.mockResolvedValue({} as any);
+
+    await useCredits("test-shop.myshopify.com", 1);
+
+    expect(prismaMock.$executeRawUnsafe).toHaveBeenCalledTimes(1);
+    expect(prismaMock.$executeRawUnsafe).toHaveBeenCalledWith(
+      `UPDATE "ShopSettings" SET "creditsUsed" = "creditsUsed" + $1, "updatedAt" = NOW() WHERE shop = $2 AND "creditsUsed" + $1 <= "creditLimit"`,
+      1,
+      "test-shop.myshopify.com"
+    );
   });
 });
