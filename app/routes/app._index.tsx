@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useLoaderData, useFetcher, Link as RemixLink } from "@remix-run/react";
@@ -16,6 +16,7 @@ import {
   Badge,
   DataTable,
   EmptyState,
+  Select,
 } from "@shopify/polaris";
 import { TitleBar, useAppBridge } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
@@ -27,6 +28,20 @@ import {
   getPlanPickerUrl,
   PLANS,
 } from "../services/billing.server";
+
+interface CollectionsQueryResponse {
+  data?: {
+    collections?: {
+      nodes: Array<{
+        id: string;
+        title: string;
+        productsCount?: {
+          count: number;
+        };
+      }>;
+    };
+  };
+}
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
@@ -43,6 +58,33 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   // Get plan picker URL for upgrade buttons
   const planPickerUrl = getPlanPickerUrl(shop);
+
+  // Get collections for dropdown (wrapped in try-catch for safety)
+  let collections: Array<{ id: string; title: string; productsCount: number }> = [];
+  try {
+    const collectionsResponse = await admin.graphql(`
+      query getCollections {
+        collections(first: 50) {
+          nodes {
+            id
+            title
+            productsCount {
+              count
+            }
+          }
+        }
+      }
+    `);
+    const collectionsData = (await collectionsResponse.json()) as CollectionsQueryResponse;
+    collections = (collectionsData.data?.collections?.nodes || []).map((c) => ({
+      id: c.id,
+      title: c.title,
+      productsCount: c.productsCount?.count ?? 0,
+    }));
+  } catch (error) {
+    console.error("[VisionTags] Failed to fetch collections:", error);
+    // Continue without collections - not critical
+  }
 
   // Get recent jobs
   const jobs = await prisma.job.findMany({
@@ -63,6 +105,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     proFeatures: PLANS.PRO.features,
     proPrice: PLANS.PRO.price,
     planPickerUrl,
+    collections,
     jobs: jobs.map((job) => ({
       id: job.id,
       status: job.status,
@@ -82,14 +125,19 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   if (action === "start-scan") {
     // Import services
-    const { fetchAllProducts } = await import("../services/products.server");
+    const { fetchAllProducts, fetchCollectionProducts } = await import("../services/products.server");
     const { queueBulkAnalysis } = await import("../services/queue.server");
     const { hasAvailableCredits, useCredits } = await import(
       "../services/billing.server"
     );
 
-    // Fetch products with images
-    const products = await fetchAllProducts(admin, 100); // Limit to 100 for V1
+    // Get selected collection (if any)
+    const selectedCollection = formData.get("selectedCollection") as string;
+
+    // Fetch products with images (from collection or all)
+    const products = selectedCollection && selectedCollection !== "all"
+      ? await fetchCollectionProducts(admin, selectedCollection, 100)
+      : await fetchAllProducts(admin, 100); // Limit to 100 for V1
 
     if (products.length === 0) {
       return json({
@@ -166,9 +214,10 @@ type ActionData = {
 };
 
 export default function Dashboard() {
-  const { shop, productCount, billing, jobs, proFeatures, proPrice, planPickerUrl } = useLoaderData<typeof loader>();
+  const { shop, productCount, billing, jobs, proFeatures, proPrice, planPickerUrl, collections } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<ActionData>();
   const shopify = useAppBridge();
+  const [selectedCollection, setSelectedCollection] = useState("all");
 
   const isScanning =
     fetcher.state === "submitting" && fetcher.formData?.get("action") === "start-scan";
@@ -182,8 +231,19 @@ export default function Dashboard() {
   }, [fetcher.data, shopify]);
 
   const startScan = () => {
-    fetcher.submit({ action: "start-scan" }, { method: "POST" });
+    fetcher.submit(
+      { action: "start-scan", selectedCollection },
+      { method: "POST" }
+    );
   };
+
+  const collectionOptions = [
+    { label: "All products", value: "all" },
+    ...collections.map((c) => ({
+      label: `${c.title} (${c.productsCount} products)`,
+      value: c.id,
+    })),
+  ];
 
   const creditPercentage = Math.round(
     (billing.creditsUsed / billing.creditLimit) * 100
@@ -274,6 +334,13 @@ export default function Dashboard() {
                     size="small"
                   />
                 </Box>
+
+                <Select
+                  label="Products to scan"
+                  options={collectionOptions}
+                  value={selectedCollection}
+                  onChange={setSelectedCollection}
+                />
 
                 <InlineStack gap="300">
                   <Button

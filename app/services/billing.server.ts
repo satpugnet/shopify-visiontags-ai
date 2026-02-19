@@ -64,11 +64,29 @@ export async function getOrCreateShopSettings(shop: string) {
 }
 
 /**
+ * Check if billing period has expired (30 days passed)
+ */
+function isBillingPeriodExpired(billingPeriodStart: Date): boolean {
+  const now = new Date();
+  const thirtyDaysInMs = 30 * 24 * 60 * 60 * 1000;
+  return now.getTime() - billingPeriodStart.getTime() >= thirtyDaysInMs;
+}
+
+/**
  * Get billing status for a shop
+ * Automatically resets credits if billing period has expired
  */
 export async function getShopBilling(shop: string): Promise<ShopBilling> {
-  const settings = await getOrCreateShopSettings(shop);
+  let settings = await getOrCreateShopSettings(shop);
   const plan = settings.plan as PlanType;
+
+  // Auto-reset credits if billing period expired (30 days)
+  if (isBillingPeriodExpired(settings.billingPeriodStart)) {
+    console.log(`[VisionTags] Auto-resetting credits for ${shop} (billing period expired)`);
+    await resetCredits(shop);
+    // Re-fetch settings after reset
+    settings = await getOrCreateShopSettings(shop);
+  }
 
   return {
     plan,
@@ -131,12 +149,18 @@ export async function useCredits(
 
 /**
  * Reset credits at the start of a new billing period
+ * Also syncs creditLimit to current plan config (handles plan changes)
  */
 export async function resetCredits(shop: string): Promise<void> {
+  const settings = await getOrCreateShopSettings(shop);
+  const plan = settings.plan as PlanType;
+  const currentPlanCredits = PLANS[plan].credits;
+
   await prisma.shopSettings.update({
     where: { shop },
     data: {
       creditsUsed: 0,
+      creditLimit: currentPlanCredits,
       billingPeriodStart: new Date(),
     },
   });

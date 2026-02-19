@@ -5,6 +5,53 @@
 
 import type { AdminApiContext } from "@shopify/shopify-app-remix/server";
 
+/**
+ * Retry a function with exponential backoff
+ * Handles Shopify API rate limits (429) and transient errors
+ */
+async function withRetry<T>(
+  fn: () => Promise<T>,
+  options: { maxRetries?: number; baseDelayMs?: number; maxDelayMs?: number } = {}
+): Promise<T> {
+  const { maxRetries = 3, baseDelayMs = 1000, maxDelayMs = 30000 } = options;
+
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+
+      // Check if this is a rate limit error or server error
+      const errorMsg = lastError.message.toLowerCase();
+      const isRetryable =
+        errorMsg.includes("429") ||
+        errorMsg.includes("throttled") ||
+        errorMsg.includes("rate") ||
+        errorMsg.includes("500") ||
+        errorMsg.includes("502") ||
+        errorMsg.includes("503") ||
+        errorMsg.includes("timeout") ||
+        errorMsg.includes("econnreset");
+
+      if (!isRetryable || attempt === maxRetries - 1) {
+        throw lastError;
+      }
+
+      // Exponential backoff with jitter
+      const delay = Math.min(
+        baseDelayMs * Math.pow(2, attempt) + Math.random() * 1000,
+        maxDelayMs
+      );
+      console.log(`[VisionTags] Shopify API retry ${attempt + 1}/${maxRetries} after ${Math.round(delay)}ms`);
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
+
+  throw lastError;
+}
+
 export interface ShopifyProduct {
   id: string;
   title: string;
@@ -26,6 +73,65 @@ export interface ProductWithImage {
   tags: string[];
 }
 
+// GraphQL Response Types
+interface ProductEdge {
+  cursor: string;
+  node: ShopifyProduct;
+}
+
+interface PageInfo {
+  hasNextPage: boolean;
+}
+
+interface ProductsQueryResponse {
+  data?: {
+    products?: {
+      edges: ProductEdge[];
+      pageInfo: PageInfo;
+    };
+  };
+}
+
+interface ProductQueryResponse {
+  data?: {
+    product: ShopifyProduct | null;
+  };
+}
+
+interface ProductUpdateResponse {
+  data?: {
+    productUpdate?: {
+      product?: {
+        id: string;
+        tags: string[];
+      };
+      userErrors?: Array<{
+        field: string;
+        message: string;
+      }>;
+    };
+  };
+}
+
+interface ProductsCountResponse {
+  data?: {
+    productsCount?: {
+      count: number;
+    };
+  };
+}
+
+interface CollectionProductsResponse {
+  data?: {
+    collection?: {
+      products?: {
+        edges: ProductEdge[];
+        pageInfo: PageInfo;
+      };
+    };
+  };
+}
+
 /**
  * Fetch all products with images from a shop
  * Uses cursor-based pagination
@@ -34,67 +140,77 @@ export async function fetchAllProducts(
   admin: AdminApiContext,
   limit: number = 250
 ): Promise<ProductWithImage[]> {
-  const products: ProductWithImage[] = [];
-  let hasNextPage = true;
-  let cursor: string | null = null;
+  try {
+    const products: ProductWithImage[] = [];
+    let hasNextPage = true;
+    let cursor: string | null = null;
 
-  while (hasNextPage && products.length < limit) {
-    const response = await admin.graphql(
-      `#graphql
-      query getProducts($first: Int!, $after: String) {
-        products(first: $first, after: $after) {
-          edges {
-            cursor
-            node {
-              id
-              title
-              featuredImage {
-                url
+    while (hasNextPage && products.length < limit) {
+      // Wrap GraphQL call with retry logic for rate limits
+      const response = await withRetry(
+        () =>
+          admin.graphql(
+            `#graphql
+            query getProducts($first: Int!, $after: String) {
+              products(first: $first, after: $after) {
+                edges {
+                  cursor
+                  node {
+                    id
+                    title
+                    featuredImage {
+                      url
+                    }
+                    productType
+                    tags
+                    category {
+                      name
+                    }
+                  }
+                }
+                pageInfo {
+                  hasNextPage
+                }
               }
-              productType
-              tags
-              category {
-                name
-              }
+            }`,
+            {
+              variables: {
+                first: Math.min(50, limit - products.length),
+                after: cursor,
+              },
             }
-          }
-          pageInfo {
-            hasNextPage
-          }
+          ),
+        { maxRetries: 3, baseDelayMs: 1000 }
+      );
+
+      const data = (await response.json()) as ProductsQueryResponse;
+      const edges: ProductEdge[] = data.data?.products?.edges || [];
+      const pageInfo = data.data?.products?.pageInfo;
+
+      for (const edge of edges) {
+        const product = edge.node as ShopifyProduct;
+
+        // Only include products with images
+        if (product.featuredImage?.url) {
+          products.push({
+            id: product.id,
+            title: product.title,
+            imageUrl: product.featuredImage.url,
+            category: product.category?.name || product.productType,
+            tags: product.tags,
+          });
         }
-      }`,
-      {
-        variables: {
-          first: Math.min(50, limit - products.length),
-          after: cursor,
-        },
       }
-    );
 
-    const data: any = await response.json();
-    const edges: any[] = data.data?.products?.edges || [];
-    const pageInfo = data.data?.products?.pageInfo;
-
-    for (const edge of edges) {
-      const product = edge.node as ShopifyProduct;
-
-      // Only include products with images
-      if (product.featuredImage?.url) {
-        products.push({
-          id: product.id,
-          title: product.title,
-          imageUrl: product.featuredImage.url,
-          category: product.category?.name || product.productType,
-          tags: product.tags,
-        });
-      }
+      hasNextPage = pageInfo?.hasNextPage || false;
+      cursor = edges.length > 0 ? edges[edges.length - 1].cursor : null;
     }
 
-    hasNextPage = pageInfo?.hasNextPage || false;
-    cursor = edges.length > 0 ? edges[edges.length - 1].cursor : null;
+    return products;
+  } catch (error) {
+    console.error("[VisionTags] Error fetching products:", error);
+    throw error;
   }
-
-  return products;
 }
 
 /**
@@ -104,41 +220,46 @@ export async function getProduct(
   admin: AdminApiContext,
   productId: string
 ): Promise<ProductWithImage | null> {
-  const response = await admin.graphql(
-    `#graphql
-    query getProduct($id: ID!) {
-      product(id: $id) {
-        id
-        title
-        featuredImage {
-          url
+  try {
+    const response = await admin.graphql(
+      `#graphql
+      query getProduct($id: ID!) {
+        product(id: $id) {
+          id
+          title
+          featuredImage {
+            url
+          }
+          productType
+          tags
+          category {
+            name
+          }
         }
-        productType
-        tags
-        category {
-          name
-        }
+      }`,
+      {
+        variables: { id: productId },
       }
-    }`,
-    {
-      variables: { id: productId },
+    );
+
+    const data = (await response.json()) as ProductQueryResponse;
+    const product = data.data?.product;
+
+    if (!product || !product.featuredImage?.url) {
+      return null;
     }
-  );
 
-  const data = await response.json();
-  const product = data.data?.product as ShopifyProduct | null;
-
-  if (!product || !product.featuredImage?.url) {
-    return null;
+    return {
+      id: product.id,
+      title: product.title,
+      imageUrl: product.featuredImage.url,
+      category: product.category?.name || product.productType,
+      tags: product.tags,
+    };
+  } catch (error) {
+    console.error(`[VisionTags] Error fetching product ${productId}:`, error);
+    throw error;
   }
-
-  return {
-    id: product.id,
-    title: product.title,
-    imageUrl: product.featuredImage.url,
-    category: product.category?.name || product.productType,
-    tags: product.tags,
-  };
 }
 
 /**
@@ -150,7 +271,7 @@ export async function updateProductTags(
   tags: string[]
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    console.log(`[Tags] Setting ${tags.length} tags for ${productId}:`, tags);
+    console.log(`[VisionTags] Setting ${tags.length} tags for ${productId}:`, tags);
 
     const response = await admin.graphql(
       `#graphql
@@ -176,24 +297,24 @@ export async function updateProductTags(
       }
     );
 
-    const data = await response.json();
+    const data = (await response.json()) as ProductUpdateResponse;
 
-    console.log(`[Tags] API response for ${productId}:`, JSON.stringify(data, null, 2));
+    console.log(`[VisionTags] Tags API response for ${productId}:`, JSON.stringify(data, null, 2));
 
-    if (data.data?.productUpdate?.userErrors?.length > 0) {
+    if (data.data?.productUpdate?.userErrors?.length) {
       const errors = data.data.productUpdate.userErrors
-        .map((e: { message: string }) => e.message)
+        .map((e) => e.message)
         .join(", ");
-      console.error(`[Tags] Error for ${productId}:`, errors);
+      console.error(`[VisionTags] Tags error for ${productId}:`, errors);
       return { success: false, error: errors };
     }
 
     const updatedTags = data.data?.productUpdate?.product?.tags || [];
-    console.log(`[Tags] Successfully set ${updatedTags.length} tags for ${productId}`);
+    console.log(`[VisionTags] Successfully set ${updatedTags.length} tags for ${productId}`);
 
     return { success: true };
   } catch (error) {
-    console.error("[Tags] Error updating tags:", error);
+    console.error("[VisionTags] Error updating tags:", error);
     return {
       success: false,
       error: error instanceof Error ? error.message : "Unknown error",
@@ -205,17 +326,22 @@ export async function updateProductTags(
  * Count total products in a shop
  */
 export async function countProducts(admin: AdminApiContext): Promise<number> {
-  const response = await admin.graphql(
-    `#graphql
-    query countProducts {
-      productsCount {
-        count
-      }
-    }`
-  );
+  try {
+    const response = await admin.graphql(
+      `#graphql
+      query countProducts {
+        productsCount {
+          count
+        }
+      }`
+    );
 
-  const data = await response.json();
-  return data.data?.productsCount?.count || 0;
+    const data = (await response.json()) as ProductsCountResponse;
+    return data.data?.productsCount?.count || 0;
+  } catch (error) {
+    console.error("[VisionTags] Error counting products:", error);
+    throw error;
+  }
 }
 
 /**
@@ -226,69 +352,74 @@ export async function fetchCollectionProducts(
   collectionId: string,
   limit: number = 250
 ): Promise<ProductWithImage[]> {
-  const products: ProductWithImage[] = [];
-  let hasNextPage = true;
-  let cursor: string | null = null;
+  try {
+    const products: ProductWithImage[] = [];
+    let hasNextPage = true;
+    let cursor: string | null = null;
 
-  while (hasNextPage && products.length < limit) {
-    const response = await admin.graphql(
-      `#graphql
-      query getCollectionProducts($id: ID!, $first: Int!, $after: String) {
-        collection(id: $id) {
-          products(first: $first, after: $after) {
-            edges {
-              cursor
-              node {
-                id
-                title
-                featuredImage {
-                  url
-                }
-                productType
-                tags
-                category {
-                  name
+    while (hasNextPage && products.length < limit) {
+      const response = await admin.graphql(
+        `#graphql
+        query getCollectionProducts($id: ID!, $first: Int!, $after: String) {
+          collection(id: $id) {
+            products(first: $first, after: $after) {
+              edges {
+                cursor
+                node {
+                  id
+                  title
+                  featuredImage {
+                    url
+                  }
+                  productType
+                  tags
+                  category {
+                    name
+                  }
                 }
               }
-            }
-            pageInfo {
-              hasNextPage
+              pageInfo {
+                hasNextPage
+              }
             }
           }
+        }`,
+        {
+          variables: {
+            id: collectionId,
+            first: Math.min(50, limit - products.length),
+            after: cursor,
+          },
         }
-      }`,
-      {
-        variables: {
-          id: collectionId,
-          first: Math.min(50, limit - products.length),
-          after: cursor,
-        },
+      );
+
+      const data = (await response.json()) as CollectionProductsResponse;
+      const edges: ProductEdge[] = data.data?.collection?.products?.edges || [];
+      const pageInfo = data.data?.collection?.products?.pageInfo;
+
+      for (const edge of edges) {
+        const product = edge.node as ShopifyProduct;
+
+        if (product.featuredImage?.url) {
+          products.push({
+            id: product.id,
+            title: product.title,
+            imageUrl: product.featuredImage.url,
+            category: product.category?.name || product.productType,
+            tags: product.tags,
+          });
+        }
       }
-    );
 
-    const data: any = await response.json();
-    const edges: any[] = data.data?.collection?.products?.edges || [];
-    const pageInfo = data.data?.collection?.products?.pageInfo;
-
-    for (const edge of edges) {
-      const product = edge.node as ShopifyProduct;
-
-      if (product.featuredImage?.url) {
-        products.push({
-          id: product.id,
-          title: product.title,
-          imageUrl: product.featuredImage.url,
-          category: product.category?.name || product.productType,
-          tags: product.tags,
-        });
-      }
+      hasNextPage = pageInfo?.hasNextPage || false;
+      cursor = edges.length > 0 ? edges[edges.length - 1].cursor : null;
     }
 
-    hasNextPage = pageInfo?.hasNextPage || false;
-    cursor = edges.length > 0 ? edges[edges.length - 1].cursor : null;
+    return products;
+  } catch (error) {
+    console.error(`[VisionTags] Error fetching collection products for ${collectionId}:`, error);
+    throw error;
   }
-
-  return products;
 }
 
 interface ProductUpdateMediaResponse {

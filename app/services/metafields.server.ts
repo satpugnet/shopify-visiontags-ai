@@ -9,6 +9,7 @@ import type { AdminApiContext } from "@shopify/shopify-app-remix/server";
 // Note: "shopify" namespace is reserved - we use "custom" for all app metafields
 const METAFIELD_MAPPINGS: Record<string, { namespace: string; key: string; type: string }> = {
   color: { namespace: "custom", key: "color", type: "single_line_text_field" },
+  color_hex: { namespace: "custom", key: "color_hex", type: "single_line_text_field" },
   pattern: { namespace: "custom", key: "pattern", type: "single_line_text_field" },
   material: { namespace: "custom", key: "material", type: "single_line_text_field" },
   target_gender: { namespace: "custom", key: "target_gender", type: "single_line_text_field" },
@@ -16,6 +17,7 @@ const METAFIELD_MAPPINGS: Record<string, { namespace: string; key: string; type:
   neckline: { namespace: "custom", key: "neckline", type: "single_line_text_field" },
   sleeve_length: { namespace: "custom", key: "sleeve_length", type: "single_line_text_field" },
   fit: { namespace: "custom", key: "fit", type: "single_line_text_field" },
+  product_type: { namespace: "custom", key: "product_type", type: "single_line_text_field" },
 };
 
 // Product categories that support apparel-specific fields

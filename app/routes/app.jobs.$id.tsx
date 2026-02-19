@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { useLoaderData, useFetcher, useNavigate } from "@remix-run/react";
+import { useLoaderData, useFetcher, useNavigate, useRevalidator } from "@remix-run/react";
 import {
   Page,
   Layout,
@@ -21,6 +21,7 @@ import {
   Tag,
   Divider,
   Banner,
+  TextField,
 } from "@shopify/polaris";
 import { TitleBar, useAppBridge } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
@@ -80,6 +81,9 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     const productIds = formData.getAll("productIds") as string[];
     const syncMetafields = formData.get("syncMetafields") === "true";
     const syncTags = formData.get("syncTags") === "true";
+    const syncAltText = formData.get("syncAltText") === "true";
+    const editsJson = formData.get("edits") as string;
+    const edits = editsJson ? JSON.parse(editsJson) : {};
 
     if (productIds.length === 0) {
       return json({ error: "No products selected", success: false });
@@ -89,7 +93,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     const { updateProductMetafields } = await import(
       "../services/metafields.server"
     );
-    const { updateProductTags } = await import("../services/products.server");
+    const { updateProductTags, updateProductImageAlt } = await import("../services/products.server");
 
     let synced = 0;
     let errors = 0;
@@ -105,24 +109,35 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         continue;
       }
 
-      const suggestedMetafields = product.suggestedMetafields as Record<
+      const originalMetafields = product.suggestedMetafields as Record<
         string,
         string
       > | null;
-      const suggestedTags = product.suggestedTags as string[] | null;
+      const originalTags = product.suggestedTags as string[] | null;
+
+      // Merge edits with original suggestions
+      const productEdits = edits[productId];
+      const suggestedMetafields = productEdits?.metafields
+        ? { ...originalMetafields, ...productEdits.metafields }
+        : originalMetafields;
+      const suggestedTags = productEdits?.tags ?? originalTags;
+      const altText = productEdits?.alt_text ?? originalMetafields?.alt_text;
 
       let metaSuccess = true;
       let tagSuccess = true;
+      let altTextSuccess = true;
       let metaError: string | undefined;
       let tagError: string | undefined;
+      let altTextError: string | undefined;
 
-      // Sync metafields
+      // Sync metafields (exclude alt_text from metafields sync)
       if (syncMetafields && suggestedMetafields) {
-        console.log(`Syncing metafields for ${product.title}:`, suggestedMetafields);
+        const { alt_text: _, ...metafieldsWithoutAlt } = suggestedMetafields;
+        console.log(`Syncing metafields for ${product.title}:`, metafieldsWithoutAlt);
         const result = await updateProductMetafields(
           admin,
           productId,
-          suggestedMetafields,
+          metafieldsWithoutAlt,
           product.currentCategory
         );
         metaSuccess = result.success;
@@ -143,7 +158,22 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         }
       }
 
-      if (metaSuccess && tagSuccess) {
+      // Sync alt text (use edited alt text if available)
+      if (syncAltText && altText) {
+        console.log(`Syncing alt text for ${product.title}:`, altText);
+        const result = await updateProductImageAlt(
+          admin,
+          productId,
+          altText
+        );
+        altTextSuccess = result.success;
+        altTextError = result.error;
+        if (!altTextSuccess) {
+          console.error(`Alt text sync failed for ${product.title}:`, altTextError);
+        }
+      }
+
+      if (metaSuccess && tagSuccess && altTextSuccess) {
         await prisma.product.update({
           where: { id: productId },
           data: {
@@ -154,7 +184,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         synced++;
       } else {
         errors++;
-        const errMsg = [metaError, tagError].filter(Boolean).join("; ");
+        const errMsg = [metaError, tagError, altTextError].filter(Boolean).join("; ");
         errorMessages.push(`${product.title}: ${errMsg}`);
         // Store error in database
         await prisma.product.update({
@@ -195,10 +225,91 @@ export default function JobDetail() {
   const fetcher = useFetcher<ActionData>();
   const navigate = useNavigate();
   const shopify = useAppBridge();
+  const revalidator = useRevalidator();
 
   const [syncMetafields, setSyncMetafields] = useState(true);
   const [syncTags, setSyncTags] = useState(true);
+  const [syncAltText, setSyncAltText] = useState(true);
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
+  const [newTagInputs, setNewTagInputs] = useState<Record<string, string>>({});
+
+  // Track edits per product
+  const [edits, setEdits] = useState<Record<string, {
+    metafields?: Record<string, string>;
+    tags?: string[];
+    alt_text?: string;
+  }>>({});
+
+  // Helper to get current metafield value (edited or original)
+  const getMetafieldValue = (productId: string, key: string, original: string | undefined) => {
+    return edits[productId]?.metafields?.[key] ?? original ?? "";
+  };
+
+  // Helper to get current tags (edited or original)
+  const getTags = (productId: string, original: string[] | null): string[] => {
+    return edits[productId]?.tags ?? original ?? [];
+  };
+
+  // Helper to get alt text (edited or original)
+  const getAltText = (productId: string, original: string | undefined): string => {
+    return edits[productId]?.alt_text ?? original ?? "";
+  };
+
+  // Update a metafield edit
+  const updateMetafieldEdit = (productId: string, key: string, value: string) => {
+    setEdits(prev => ({
+      ...prev,
+      [productId]: {
+        ...prev[productId],
+        metafields: {
+          ...prev[productId]?.metafields,
+          [key]: value,
+        },
+      },
+    }));
+  };
+
+  // Update alt text edit
+  const updateAltTextEdit = (productId: string, value: string) => {
+    setEdits(prev => ({
+      ...prev,
+      [productId]: {
+        ...prev[productId],
+        alt_text: value,
+      },
+    }));
+  };
+
+  // Add a tag
+  const addTag = (productId: string, product: typeof products[0]) => {
+    const newTag = newTagInputs[productId]?.trim();
+    if (!newTag) return;
+
+    const currentTags = getTags(productId, product.suggestedTags);
+    if (currentTags.includes(newTag)) return;
+
+    setEdits(prev => ({
+      ...prev,
+      [productId]: {
+        ...prev[productId],
+        tags: [...currentTags, newTag],
+      },
+    }));
+    setNewTagInputs(prev => ({ ...prev, [productId]: "" }));
+  };
+
+  // Remove a tag
+  const removeTag = (productId: string, tagIndex: number, product: typeof products[0]) => {
+    const currentTags = getTags(productId, product.suggestedTags);
+    const newTags = currentTags.filter((_, idx) => idx !== tagIndex);
+    setEdits(prev => ({
+      ...prev,
+      [productId]: {
+        ...prev[productId],
+        tags: newTags,
+      },
+    }));
+  };
 
   const analyzedProducts = products.filter((p) => p.status === "ANALYZED");
   const resourceName = { singular: "product", plural: "products" };
@@ -207,6 +318,20 @@ export default function JobDetail() {
     useIndexResourceState(analyzedProducts as { id: string }[]);
 
   const isSyncing = fetcher.state === "submitting";
+  const isProcessing = job.status === "QUEUED" || job.status === "PROCESSING";
+
+  // Auto-refresh while job is processing
+  useEffect(() => {
+    if (!isProcessing) return;
+
+    const interval = setInterval(() => {
+      if (revalidator.state === "idle") {
+        revalidator.revalidate();
+      }
+    }, 3000); // Refresh every 3 seconds
+
+    return () => clearInterval(interval);
+  }, [isProcessing, revalidator]);
 
   useEffect(() => {
     if (fetcher.data?.success && fetcher.data?.message) {
@@ -221,6 +346,8 @@ export default function JobDetail() {
     formData.append("action", "sync");
     formData.append("syncMetafields", String(syncMetafields));
     formData.append("syncTags", String(syncTags));
+    formData.append("syncAltText", String(syncAltText));
+    formData.append("edits", JSON.stringify(edits));
     selectedResources.forEach((id) => formData.append("productIds", id));
     fetcher.submit(formData, { method: "POST" });
   };
@@ -384,7 +511,7 @@ export default function JobDetail() {
                 Sync Options
               </Text>
 
-              <InlineStack gap="400">
+              <InlineStack gap="400" wrap>
                 <Checkbox
                   label="Sync Metafields (color, material, pattern, etc.)"
                   checked={syncMetafields}
@@ -395,6 +522,11 @@ export default function JobDetail() {
                   checked={syncTags}
                   onChange={setSyncTags}
                 />
+                <Checkbox
+                  label="Sync Alt Text (image accessibility)"
+                  checked={syncAltText}
+                  onChange={setSyncAltText}
+                />
               </InlineStack>
 
               <InlineStack gap="300">
@@ -404,7 +536,7 @@ export default function JobDetail() {
                   loading={isSyncing}
                   disabled={
                     selectedResources.length === 0 ||
-                    (!syncMetafields && !syncTags)
+                    (!syncMetafields && !syncTags && !syncAltText)
                   }
                 >
                   {`Sync ${selectedResources.length} Selected Products`}
@@ -458,29 +590,38 @@ export default function JobDetail() {
                         Suggested Metafields
                       </Text>
                       {product.suggestedMetafields ? (
-                        <BlockStack gap="100">
-                          {Object.entries(product.suggestedMetafields).map(
-                            ([key, value]) =>
-                              value && (
-                                <InlineStack
-                                  key={key}
-                                  align="space-between"
-                                  gap="200"
-                                >
-                                  <Text as="span" variant="bodySm" tone="subdued">
-                                    {key.replace(/_/g, " ")}:
-                                  </Text>
-                                  <Text as="span" variant="bodySm">
-                                    {value}
-                                  </Text>
-                                </InlineStack>
-                              )
-                          )}
+                        <BlockStack gap="200">
+                          {Object.entries(product.suggestedMetafields)
+                            .filter(([key]) => key !== "alt_text")
+                            .map(([key, value]) => (
+                              <TextField
+                                key={key}
+                                label={key.replace(/_/g, " ")}
+                                value={getMetafieldValue(product.id, key, value)}
+                                onChange={(newValue) => updateMetafieldEdit(product.id, key, newValue)}
+                                autoComplete="off"
+                                size="slim"
+                              />
+                            ))}
                         </BlockStack>
                       ) : (
                         <Text as="p" variant="bodySm" tone="subdued">
                           No metafields suggested
                         </Text>
+                      )}
+
+                      {(product.suggestedMetafields?.alt_text || edits[product.id]?.alt_text) && (
+                        <BlockStack gap="200">
+                          <Divider />
+                          <TextField
+                            label="Alt Text"
+                            value={getAltText(product.id, product.suggestedMetafields?.alt_text)}
+                            onChange={(newValue) => updateAltTextEdit(product.id, newValue)}
+                            autoComplete="off"
+                            multiline={2}
+                            helpText="Max 125 characters for accessibility"
+                          />
+                        </BlockStack>
                       )}
                     </BlockStack>
                   </Layout.Section>
@@ -490,17 +631,37 @@ export default function JobDetail() {
                       <Text as="h4" variant="headingSm">
                         Suggested Tags
                       </Text>
-                      {product.suggestedTags && product.suggestedTags.length > 0 ? (
-                        <InlineStack gap="100" wrap>
-                          {product.suggestedTags.map((tag, i) => (
-                            <Tag key={i}>{tag}</Tag>
-                          ))}
-                        </InlineStack>
-                      ) : (
-                        <Text as="p" variant="bodySm" tone="subdued">
-                          No tags suggested
-                        </Text>
-                      )}
+                      <InlineStack gap="100" wrap>
+                        {getTags(product.id, product.suggestedTags).map((tag, i) => (
+                          <Tag
+                            key={i}
+                            onRemove={() => removeTag(product.id, i, product)}
+                          >
+                            {tag}
+                          </Tag>
+                        ))}
+                      </InlineStack>
+
+                      <InlineStack gap="200" blockAlign="end">
+                        <div style={{ flex: 1 }}>
+                          <TextField
+                            label="Add tag"
+                            labelHidden
+                            placeholder="Add new tag..."
+                            value={newTagInputs[product.id] || ""}
+                            onChange={(value) => setNewTagInputs(prev => ({ ...prev, [product.id]: value }))}
+                            autoComplete="off"
+                            size="slim"
+                            connectedRight={
+                              <Button
+                                onClick={() => addTag(product.id, product)}
+                              >
+                                Add
+                              </Button>
+                            }
+                          />
+                        </div>
+                      </InlineStack>
 
                       {product.currentTags && (
                         <>

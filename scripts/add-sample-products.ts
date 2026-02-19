@@ -157,7 +157,9 @@ async function createProduct(
 
 async function main() {
   // Get session from database
-  const session = await prisma.session.findFirst();
+  const session = await prisma.session.findFirst({
+    where: { shop: 'visiontags-dev.myshopify.com' }
+  });
 
   if (!session) {
     console.error("No session found in database");

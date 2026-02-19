@@ -73,15 +73,16 @@ app/
 | Plan  | Price   | Credits/mo | Features |
 |-------|---------|------------|----------|
 | Free  | $0      | 50         | Basic scan |
-| Pro   | $19/mo  | 5,000      | Auto-sync, all features |
+| Pro   | $19/mo  | 4,000      | Auto-sync, all features |
 
 Hard cap at plan limit — no overage. Credits reset each billing cycle.
 Uses Shopify Managed Pricing (fixed recurring only, no usage-based billing).
 
 ### Cost Analysis (Claude Haiku 4.5)
-- Cost per scan: ~$0.003
-- Free (50 scans): ~$0.15 cost (acquisition)
-- Pro (5,000 scans): ~$15 cost, $4 profit (21% margin)
+- Cost per scan: ~$0.00255 (image: 853 tokens @ 800x800, prompt: ~450 tokens, output: ~250 tokens)
+- Free (50 scans): ~$0.13 cost (acquisition)
+- Pro (4,000 scans): ~$10.20 cost, $8.80 profit (46% margin)
+- Overage: $0.005/scan (49% margin)
 
 ## Current Progress
 

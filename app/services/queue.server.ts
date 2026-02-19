@@ -151,11 +151,16 @@ export function startAnalysisWorker(): Worker<AnalysisJobData> {
             },
           });
         } else {
+          // Include alt_text in metafields blob for storage
+          const metafieldsWithAlt = {
+            ...result.metafields,
+            ...(result.alt_text ? { alt_text: result.alt_text } : {}),
+          };
           await prisma.product.update({
             where: { id: productId },
             data: {
               status: "ANALYZED",
-              suggestedMetafields: result.metafields,
+              suggestedMetafields: metafieldsWithAlt,
               suggestedTags: result.tags,
             },
           });

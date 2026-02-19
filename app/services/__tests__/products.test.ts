@@ -1,7 +1,8 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// Since updateProductTags requires an admin context (Shopify API),
-// we test the tag data transformation logic separately
+// ==================================
+// UNIT TESTS (no mocking needed)
+// ==================================
 
 describe("Tag data validation", () => {
   it("should accept an array of string tags", () => {

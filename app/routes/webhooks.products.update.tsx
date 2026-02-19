@@ -1,10 +1,16 @@
+/**
+ * Products Update Webhook Handler
+ *
+ * Re-analyzes products when their images change (Pro feature with auto-sync).
+ */
+
 import type { ActionFunctionArgs } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { queueProductAnalysis } from "../services/queue.server";
 import { hasAvailableCredits, useCredits } from "../services/billing.server";
 
-interface ProductCreatePayload {
+interface ProductUpdatePayload {
   id: number;
   title: string;
   product_type: string;
@@ -12,6 +18,9 @@ interface ProductCreatePayload {
   image?: {
     src: string;
   } | null;
+  images?: Array<{
+    src: string;
+  }>;
 }
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -20,7 +29,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   try {
     console.log(`[VisionTags] Received ${topic} webhook for ${shop}`);
 
-    const productData = payload as ProductCreatePayload;
+    const productData = payload as ProductUpdatePayload;
+    const productId = `gid://shopify/Product/${productData.id}`;
 
     // Check if shop has auto-sync enabled
     const settings = await prisma.shopSettings.findUnique({
@@ -28,13 +38,26 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     });
 
     if (!settings?.autoSyncNewProducts) {
-      console.log(`[VisionTags] Auto-sync disabled for ${shop}, skipping`);
+      console.log(`[VisionTags] Auto-sync disabled for ${shop}, skipping product update`);
       return new Response();
     }
 
-    // Check if product has an image
-    if (!productData.image?.src) {
+    // Get the primary image
+    const imageUrl = productData.image?.src || productData.images?.[0]?.src;
+    if (!imageUrl) {
       console.log(`[VisionTags] Product ${productData.id} has no image, skipping`);
+      return new Response();
+    }
+
+    // Check if this product was previously analyzed
+    const existingProduct = await prisma.product.findFirst({
+      where: { id: productId },
+      orderBy: { createdAt: "desc" },
+    });
+
+    // Only re-analyze if the image changed
+    if (existingProduct && existingProduct.imageUrl === imageUrl) {
+      console.log(`[VisionTags] Product ${productData.id} image unchanged, skipping`);
       return new Response();
     }
 
@@ -45,9 +68,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return new Response();
     }
 
-    // Create a job for this single product
-    const productId = `gid://shopify/Product/${productData.id}`;
-
+    // Create a new job for this product update
     const job = await prisma.job.create({
       data: {
         shop,
@@ -59,40 +80,37 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     // Create product record
     await prisma.product.create({
       data: {
-        id: productId,
+        id: `${productId}-${Date.now()}`, // Unique ID for re-analysis
         jobId: job.id,
         title: productData.title,
-        imageUrl: productData.image.src,
+        imageUrl: imageUrl,
         currentCategory: productData.product_type,
         currentTags: productData.tags,
         status: "PENDING",
       },
     });
 
-    // Queue for processing - this throws if Redis is unavailable
+    // Queue for processing
     try {
-      await queueProductAnalysis(job.id, productId, productData.image.src, shop);
+      await queueProductAnalysis(job.id, productId, imageUrl, shop);
     } catch (queueError) {
-      // Queue failed - don't deduct credits, clean up the job record
-      console.error(`[VisionTags] Failed to queue product ${productId} - not deducting credits:`, queueError);
+      console.error(`[VisionTags] Failed to queue product update ${productId}:`, queueError);
       await prisma.job.delete({ where: { id: job.id } }).catch(() => {});
       return new Response();
     }
 
-    // Queue succeeded - now deduct credit
-    // Even if this fails, the analysis will still happen (better to over-serve than under-charge)
+    // Deduct credit
     try {
       await useCredits(shop, 1);
     } catch (creditError) {
-      console.error(`[VisionTags] Failed to deduct credit for ${shop} (analysis will still run):`, creditError);
+      console.error(`[VisionTags] Failed to deduct credit for ${shop}:`, creditError);
     }
 
-    console.log(`[VisionTags] Queued auto-analysis for new product ${productId} in ${shop}`);
+    console.log(`[VisionTags] Queued re-analysis for updated product ${productId} in ${shop}`);
 
     return new Response();
   } catch (error) {
     console.error(`[VisionTags] Error handling ${topic} webhook for ${shop}:`, error);
-    // Always return 200 to prevent Shopify retries
     return new Response();
   }
 };

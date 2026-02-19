@@ -2,7 +2,7 @@
   "name": "app",
   "private": true,
   "scripts": {
-    "build": "remix vite:build",
+    "build": "rm -rf build && remix vite:build",
     "dev": "shopify app dev",
     "config:link": "shopify app config link",
     "generate": "shopify app generate",
@@ -65,7 +65,8 @@
     "remotion": "^4.0.407",
     "typescript": "^5.2.2",
     "vite": "^6.2.2",
-    "vitest": "^4.0.17"
+    "vitest": "^4.0.17",
+    "vitest-mock-extended": "^3.1.0"
   },
   "workspaces": {
     "packages": [

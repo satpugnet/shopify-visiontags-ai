@@ -10,9 +10,53 @@ const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
 });
 
-// The AI prompt for hybrid metafields + tags output
+/**
+ * Retry a function with exponential backoff
+ * Handles rate limits (429) and transient errors
+ */
+async function withRetry<T>(
+  fn: () => Promise<T>,
+  options: { maxRetries?: number; baseDelayMs?: number; maxDelayMs?: number } = {}
+): Promise<T> {
+  const { maxRetries = 3, baseDelayMs = 1000, maxDelayMs = 30000 } = options;
+
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+
+      // Check if this is a rate limit error (429) or server error (5xx)
+      const isRetryable =
+        lastError.message.includes("429") ||
+        lastError.message.includes("rate") ||
+        lastError.message.includes("500") ||
+        lastError.message.includes("502") ||
+        lastError.message.includes("503") ||
+        lastError.message.includes("timeout");
+
+      if (!isRetryable || attempt === maxRetries - 1) {
+        throw lastError;
+      }
+
+      // Exponential backoff with jitter
+      const delay = Math.min(
+        baseDelayMs * Math.pow(2, attempt) + Math.random() * 1000,
+        maxDelayMs
+      );
+      console.log(`[VisionTags] Retry ${attempt + 1}/${maxRetries} after ${Math.round(delay)}ms`);
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
+
+  throw lastError;
+}
+
+// The AI prompt for hybrid metafields + tags + alt text output
 const VISION_PROMPT = `Analyze this product image for an e-commerce store.
-Return a JSON object with TWO distinct sections:
+Return a JSON object with THREE sections:
 
 {
   "metafields": {
@@ -20,26 +64,30 @@ Return a JSON object with TWO distinct sections:
     // Only include keys where you can make a confident visual assessment
     "target_gender": "Female" | "Male" | "Unisex",
     "age_group": "Adult" | "Teen" | "Kids" | "Baby",
-    "color": "Primary color (e.g., Navy Blue)",
+    "color": "Primary color name (e.g., Navy Blue)",
+    "color_hex": "#XXXXXX (hex code for the primary color)",
     "pattern": "Solid" | "Striped" | "Floral" | "Plaid" | "Paisley" | "Animal Print" | "Geometric" | "Abstract",
     "material": "Cotton" | "Polyester" | "Silk" | "Wool" | "Denim" | "Leather" | "Linen" | "Synthetic",
     "neckline": "Crew" | "V-neck" | "Scoop" | "Boat" | "Turtleneck" | "Off-shoulder" | "Halter" | "Collared" | null,
     "sleeve_length": "Sleeveless" | "Short" | "3/4" | "Long" | null,
-    "fit": "Slim" | "Regular" | "Relaxed" | "Oversized"
+    "fit": "Slim" | "Regular" | "Relaxed" | "Oversized",
+    "product_type": "Suggested Shopify product type (e.g., T-Shirt, Dress, Pants, Jacket, Bag, Shoes)"
   },
   "tags": [
     // SEO keywords and vibe/occasion strings (Title Case)
     // Include: color, pattern, material as keywords
     // Add: 3-5 descriptive vibe/occasion words
     // Examples: "Navy Blue", "Striped", "Cotton", "Summer Vibes", "Business Casual", "Resort Wear"
-  ]
+  ],
+  "alt_text": "Descriptive alt text for accessibility and SEO, max 125 characters. Describe what the product looks like."
 }
 
 IMPORTANT RULES:
 1. Only include metafield keys where you can make a confident visual assessment
 2. If the product is not apparel (e.g., accessories, home goods), omit clothing-specific fields like neckline, sleeve_length
 3. Tags should be Title Case and include both factual (color, material) and vibe/mood keywords
-4. Return valid JSON only - no markdown, no explanation
+4. alt_text should be descriptive and accessibility-friendly, describing the product visually
+5. Return valid JSON only - no markdown, no explanation
 
 Return valid JSON only.`;
 
@@ -48,13 +96,16 @@ export interface VisionResult {
     target_gender?: string;
     age_group?: string;
     color?: string;
+    color_hex?: string;
     pattern?: string;
     material?: string;
     neckline?: string | null;
     sleeve_length?: string | null;
     fit?: string;
+    product_type?: string;
   };
   tags: string[];
+  alt_text?: string;
 }
 
 export interface VisionError {
@@ -123,6 +174,7 @@ function optimizeImageUrl(imageUrl: string): string {
 
 /**
  * Analyze a product image using Claude Vision
+ * Includes retry logic for rate limits and transient errors
  */
 export async function analyzeProductImage(
   imageUrl: string
@@ -131,28 +183,33 @@ export async function analyzeProductImage(
     // Optimize image URL to save tokens
     const optimizedUrl = optimizeImageUrl(imageUrl);
 
-    const response = await anthropic.messages.create({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 512,
-      messages: [
-        {
-          role: "user",
-          content: [
+    // Call Claude API with retry logic for rate limits
+    const response = await withRetry(
+      () =>
+        anthropic.messages.create({
+          model: "claude-haiku-4-5-20251001",
+          max_tokens: 512,
+          messages: [
             {
-              type: "image",
-              source: {
-                type: "url",
-                url: optimizedUrl,
-              },
-            },
-            {
-              type: "text",
-              text: VISION_PROMPT,
+              role: "user",
+              content: [
+                {
+                  type: "image",
+                  source: {
+                    type: "url",
+                    url: optimizedUrl,
+                  },
+                },
+                {
+                  type: "text",
+                  text: VISION_PROMPT,
+                },
+              ],
             },
           ],
-        },
-      ],
-    });
+        }),
+      { maxRetries: 3, baseDelayMs: 2000 }
+    );
 
     // Extract text content from response
     const textContent = response.content.find((block) => block.type === "text");

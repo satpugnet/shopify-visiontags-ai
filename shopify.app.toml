@@ -32,22 +32,29 @@ api_version = "2025-01"
   topics = ["products/create"]
   uri = "/webhooks/products/create"
 
+  # Handled by: /app/routes/webhooks.products.update.tsx
+  # Re-analyze products when images change
+  [[webhooks.subscriptions]]
+  topics = ["products/update"]
+  uri = "/webhooks/products/update"
+
+  # Handled by: /app/routes/webhooks.products.delete.tsx
+  # Clean up orphaned records when products are deleted
+  [[webhooks.subscriptions]]
+  topics = ["products/delete"]
+  uri = "/webhooks/products/delete"
+
   # Handled by: /app/routes/webhooks.app-subscriptions.update.tsx
   # Sync plan status when merchant changes subscription (Managed Pricing)
   [[webhooks.subscriptions]]
   topics = ["app_subscriptions/update"]
   uri = "/webhooks/app-subscriptions/update"
 
-  # Webhooks can have filters
-  # Only receive webhooks for product updates with a product price >= 10.00
-  # See: https://shopify.dev/docs/apps/build/webhooks/customize/filters
-  # [[webhooks.subscriptions]]
-  # topics = ["products/update"]
-  # uri = "/webhooks/products/update"
-  # filter = "variants.price:>=10.00"
-
   # Mandatory compliance topics for public apps
   # See: https://shopify.dev/docs/apps/build/privacy-law-compliance
   [[webhooks.subscriptions]]
   compliance_topics = ["customers/data_request", "customers/redact", "shop/redact"]
   uri = "/webhooks/compliance"
+
+[build]
+automatically_update_urls_on_dev = true

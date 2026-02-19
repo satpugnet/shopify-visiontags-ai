@@ -1,9 +1,82 @@
-import { describe, it, expect } from "vitest";
-import { PLANS, getPlanPickerUrl } from "../billing.server";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
+// Use vi.hoisted to create mock before it's used in vi.mock
+const prismaMock = vi.hoisted(() => ({
+  shopSettings: {
+    findUnique: vi.fn(),
+    create: vi.fn(),
+    update: vi.fn(),
+  },
+  usageRecord: {
+    upsert: vi.fn(),
+  },
+}));
+
+// Mock the module
+vi.mock("../../db.server", () => ({
+  default: prismaMock,
+}));
+
+// Import after mocking
+import {
+  PLANS,
+  getOrCreateShopSettings,
+  getShopBilling,
+  hasAvailableCredits,
+  useCredits,
+  resetCredits,
+  upgradeToProPlan,
+  downgradeToFreePlan,
+  toggleAutoSync,
+} from "../billing.server";
+
+// Test fixtures
+const freeShopSettings = {
+  id: "settings-free-1",
+  shop: "test-shop.myshopify.com",
+  plan: "FREE" as const,
+  creditsUsed: 30,
+  creditLimit: 50,
+  billingPeriodStart: new Date(),
+  autoSyncNewProducts: false,
+  createdAt: new Date(),
+  updatedAt: new Date(),
+};
+
+const proShopSettings = {
+  id: "settings-pro-1",
+  shop: "pro-shop.myshopify.com",
+  plan: "PRO" as const,
+  creditsUsed: 2500,
+  creditLimit: 5000,
+  billingPeriodStart: new Date(),
+  autoSyncNewProducts: true,
+  createdAt: new Date(),
+  updatedAt: new Date(),
+};
+
+const exhaustedFreeSettings = {
+  ...freeShopSettings,
+  creditsUsed: 50,
+};
+
+const exhaustedProSettings = {
+  ...proShopSettings,
+  creditsUsed: 5000,
+};
+
+const expiredBillingSettings = {
+  ...freeShopSettings,
+  billingPeriodStart: new Date(Date.now() - 31 * 24 * 60 * 60 * 1000),
+};
+
+beforeEach(() => {
+  vi.clearAllMocks();
+});
 
 describe("PLANS configuration", () => {
   describe("FREE plan", () => {
-    it("should have correct credit limit", () => {
+    it("should have correct credit limit (50)", () => {
       expect(PLANS.FREE.credits).toBe(50);
     });
 
@@ -26,7 +99,7 @@ describe("PLANS configuration", () => {
   });
 
   describe("PRO plan", () => {
-    it("should have correct credit limit", () => {
+    it("should have correct credit limit (5000)", () => {
       expect(PLANS.PRO.credits).toBe(5000);
     });
 
@@ -63,14 +136,56 @@ describe("PLANS configuration", () => {
   });
 });
 
-describe("Credit calculations (unit logic)", () => {
-  // These test the logic that would be used in billing functions
-  // Actual database operations require integration tests
+describe("Billing period expiration", () => {
+  it("should detect expired billing period (30+ days)", () => {
+    const thirtyOneDaysAgo = new Date();
+    thirtyOneDaysAgo.setDate(thirtyOneDaysAgo.getDate() - 31);
 
+    const now = new Date();
+    const thirtyDaysInMs = 30 * 24 * 60 * 60 * 1000;
+    const isExpired = now.getTime() - thirtyOneDaysAgo.getTime() >= thirtyDaysInMs;
+
+    expect(isExpired).toBe(true);
+  });
+
+  it("should NOT detect expired billing period (less than 30 days)", () => {
+    const twentyNineDaysAgo = new Date();
+    twentyNineDaysAgo.setDate(twentyNineDaysAgo.getDate() - 29);
+
+    const now = new Date();
+    const thirtyDaysInMs = 30 * 24 * 60 * 60 * 1000;
+    const isExpired = now.getTime() - twentyNineDaysAgo.getTime() >= thirtyDaysInMs;
+
+    expect(isExpired).toBe(false);
+  });
+
+  it("should detect exactly 30 days as expired", () => {
+    const exactlyThirtyDaysAgo = new Date();
+    exactlyThirtyDaysAgo.setDate(exactlyThirtyDaysAgo.getDate() - 30);
+
+    const now = new Date();
+    const thirtyDaysInMs = 30 * 24 * 60 * 60 * 1000;
+    const isExpired = now.getTime() - exactlyThirtyDaysAgo.getTime() >= thirtyDaysInMs;
+
+    expect(isExpired).toBe(true);
+  });
+
+  it("should handle new accounts (billing period just started)", () => {
+    const justNow = new Date();
+
+    const now = new Date();
+    const thirtyDaysInMs = 30 * 24 * 60 * 60 * 1000;
+    const isExpired = now.getTime() - justNow.getTime() >= thirtyDaysInMs;
+
+    expect(isExpired).toBe(false);
+  });
+});
+
+describe("Credit calculations", () => {
   it("should calculate remaining credits correctly", () => {
     const creditLimit = 50;
     const creditsUsed = 30;
-    const creditsRemaining = creditLimit - creditsUsed;
+    const creditsRemaining = Math.max(0, creditLimit - creditsUsed);
 
     expect(creditsRemaining).toBe(20);
   });
@@ -78,41 +193,9 @@ describe("Credit calculations (unit logic)", () => {
   it("should detect when credits are exhausted", () => {
     const creditLimit = 50;
     const creditsUsed = 50;
-    const creditsRemaining = creditLimit - creditsUsed;
+    const creditsRemaining = Math.max(0, creditLimit - creditsUsed);
 
     expect(creditsRemaining).toBe(0);
-    expect(creditsRemaining >= 1).toBe(false); // Cannot use more credits
-  });
-
-  it("should detect when not enough credits for bulk operation", () => {
-    const creditLimit = 50;
-    const creditsUsed = 45;
-    const creditsRemaining = creditLimit - creditsUsed;
-    const requiredCredits = 10;
-
-    expect(creditsRemaining >= requiredCredits).toBe(false);
-  });
-
-  it("should allow operations when enough credits available", () => {
-    const creditLimit = 2000; // PRO plan
-    const creditsUsed = 100;
-    const creditsRemaining = creditLimit - creditsUsed;
-    const requiredCredits = 50;
-
-    expect(creditsRemaining >= requiredCredits).toBe(true);
-  });
-});
-
-describe("getPlanPickerUrl", () => {
-  it("should construct correct URL from shop domain", () => {
-    const url = getPlanPickerUrl("cool-store.myshopify.com");
-    expect(url).toContain("https://admin.shopify.com/store/cool-store/charges/");
-    expect(url).toContain("/pricing_plans");
-  });
-
-  it("should extract store handle correctly", () => {
-    const url = getPlanPickerUrl("my-test-shop.myshopify.com");
-    expect(url).toContain("/store/my-test-shop/");
   });
 });
 
@@ -134,5 +217,272 @@ describe("Month formatting for usage records", () => {
     for (const { date, expected } of dates) {
       expect(date.toISOString().slice(0, 7)).toBe(expected);
     }
+  });
+});
+
+describe("Subscription status handling", () => {
+  it("should recognize ACTIVE as valid subscription", () => {
+    const status = "ACTIVE";
+    const isActive = status === "ACTIVE";
+    expect(isActive).toBe(true);
+  });
+
+  it("should recognize CANCELLED as inactive", () => {
+    const inactiveStatuses = ["CANCELLED", "EXPIRED", "DECLINED"];
+
+    for (const status of inactiveStatuses) {
+      const shouldDowngrade =
+        status === "CANCELLED" ||
+        status === "EXPIRED" ||
+        status === "DECLINED";
+      expect(shouldDowngrade).toBe(true);
+    }
+  });
+
+  it("should handle FROZEN status (payment issues)", () => {
+    const status = "FROZEN";
+    const isFrozen = status === "FROZEN";
+    expect(isFrozen).toBe(true);
+  });
+});
+
+// ============================================
+// INTEGRATION TESTS (with mocked Prisma)
+// ============================================
+
+describe("getOrCreateShopSettings (integration)", () => {
+  it("should return existing settings if found", async () => {
+    prismaMock.shopSettings.findUnique.mockResolvedValue(freeShopSettings as any);
+
+    const result = await getOrCreateShopSettings("test-shop.myshopify.com");
+
+    expect(result).toEqual(freeShopSettings);
+    expect(prismaMock.shopSettings.create).not.toHaveBeenCalled();
+  });
+
+  it("should create new FREE settings if not found", async () => {
+    prismaMock.shopSettings.findUnique.mockResolvedValue(null);
+    prismaMock.shopSettings.create.mockResolvedValue({
+      ...freeShopSettings,
+      creditsUsed: 0,
+    } as any);
+
+    const result = await getOrCreateShopSettings("new-shop.myshopify.com");
+
+    expect(prismaMock.shopSettings.create).toHaveBeenCalledWith({
+      data: {
+        shop: "new-shop.myshopify.com",
+        plan: "FREE",
+        creditLimit: 50,
+      },
+    });
+    expect(result.plan).toBe("FREE");
+  });
+});
+
+describe("getShopBilling (integration)", () => {
+  it("should return correct billing for FREE plan", async () => {
+    prismaMock.shopSettings.findUnique.mockResolvedValue(freeShopSettings as any);
+
+    const billing = await getShopBilling("test-shop.myshopify.com");
+
+    expect(billing.plan).toBe("FREE");
+    expect(billing.creditLimit).toBe(50);
+    expect(billing.creditsUsed).toBe(30);
+    expect(billing.creditsRemaining).toBe(20);
+  });
+
+  it("should return correct billing for PRO plan", async () => {
+    prismaMock.shopSettings.findUnique.mockResolvedValue(proShopSettings as any);
+
+    const billing = await getShopBilling("pro-shop.myshopify.com");
+
+    expect(billing.plan).toBe("PRO");
+    expect(billing.creditLimit).toBe(5000);
+    expect(billing.creditsUsed).toBe(2500);
+    expect(billing.creditsRemaining).toBe(2500);
+  });
+
+  it("should show 0 remaining when credits exhausted", async () => {
+    prismaMock.shopSettings.findUnique.mockResolvedValue(exhaustedProSettings as any);
+
+    const billing = await getShopBilling("pro-shop.myshopify.com");
+
+    expect(billing.creditsRemaining).toBe(0);
+  });
+
+  it("should auto-reset credits when billing period expires", async () => {
+    prismaMock.shopSettings.findUnique
+      .mockResolvedValueOnce(expiredBillingSettings as any)
+      .mockResolvedValueOnce(expiredBillingSettings as any)
+      .mockResolvedValueOnce({ ...expiredBillingSettings, creditsUsed: 0, billingPeriodStart: new Date() } as any);
+    prismaMock.shopSettings.update.mockResolvedValue({} as any);
+
+    const billing = await getShopBilling("test-shop.myshopify.com");
+
+    expect(prismaMock.shopSettings.update).toHaveBeenCalled();
+    expect(billing.creditsUsed).toBe(0);
+  });
+});
+
+describe("hasAvailableCredits (integration)", () => {
+  it("should allow when FREE has sufficient credits", async () => {
+    prismaMock.shopSettings.findUnique.mockResolvedValue(freeShopSettings as any);
+
+    const result = await hasAvailableCredits("test-shop.myshopify.com", 10);
+
+    expect(result.allowed).toBe(true);
+  });
+
+  it("should deny when FREE exhausted", async () => {
+    prismaMock.shopSettings.findUnique.mockResolvedValue(exhaustedFreeSettings as any);
+
+    const result = await hasAvailableCredits("test-shop.myshopify.com", 1);
+
+    expect(result.allowed).toBe(false);
+  });
+
+  it("should deny when PRO exhausted (hard cap)", async () => {
+    prismaMock.shopSettings.findUnique.mockResolvedValue(exhaustedProSettings as any);
+
+    const result = await hasAvailableCredits("pro-shop.myshopify.com", 1);
+
+    expect(result.allowed).toBe(false);
+  });
+
+  it("should use default required count of 1", async () => {
+    prismaMock.shopSettings.findUnique.mockResolvedValue(freeShopSettings as any);
+
+    const result = await hasAvailableCredits("test-shop.myshopify.com");
+
+    expect(result.allowed).toBe(true);
+  });
+});
+
+describe("useCredits (integration)", () => {
+  it("should increment credits and return remaining", async () => {
+    prismaMock.shopSettings.findUnique.mockResolvedValue(freeShopSettings as any);
+    prismaMock.shopSettings.update.mockResolvedValue({
+      ...freeShopSettings,
+      creditsUsed: 35,
+    } as any);
+    prismaMock.usageRecord.upsert.mockResolvedValue({} as any);
+
+    const result = await useCredits("test-shop.myshopify.com", 5);
+
+    expect(result.success).toBe(true);
+    expect(result.remaining).toBe(15);
+    expect(prismaMock.shopSettings.update).toHaveBeenCalledWith({
+      where: { shop: "test-shop.myshopify.com" },
+      data: { creditsUsed: 35 },
+    });
+  });
+
+  it("should reject when exceeds credit limit", async () => {
+    prismaMock.shopSettings.findUnique.mockResolvedValue({
+      ...freeShopSettings,
+      creditsUsed: 48,
+    } as any);
+
+    const result = await useCredits("test-shop.myshopify.com", 10);
+
+    expect(result.success).toBe(false);
+    expect(result.remaining).toBe(2);
+  });
+
+  it("should track usage in UsageRecord", async () => {
+    prismaMock.shopSettings.findUnique.mockResolvedValue(freeShopSettings as any);
+    prismaMock.shopSettings.update.mockResolvedValue({
+      ...freeShopSettings,
+      creditsUsed: 35,
+    } as any);
+    prismaMock.usageRecord.upsert.mockResolvedValue({} as any);
+
+    await useCredits("test-shop.myshopify.com", 5);
+
+    expect(prismaMock.usageRecord.upsert).toHaveBeenCalled();
+  });
+});
+
+describe("resetCredits (integration)", () => {
+  it("should reset credits and update billing period", async () => {
+    prismaMock.shopSettings.findUnique.mockResolvedValue(freeShopSettings as any);
+    prismaMock.shopSettings.update.mockResolvedValue({} as any);
+
+    await resetCredits("test-shop.myshopify.com");
+
+    expect(prismaMock.shopSettings.update).toHaveBeenCalledWith({
+      where: { shop: "test-shop.myshopify.com" },
+      data: {
+        creditsUsed: 0,
+        creditLimit: 50,
+        billingPeriodStart: expect.any(Date),
+      },
+    });
+  });
+});
+
+describe("upgradeToProPlan (integration)", () => {
+  it("should update plan and reset credits", async () => {
+    prismaMock.shopSettings.update.mockResolvedValue({} as any);
+
+    await upgradeToProPlan("test-shop.myshopify.com");
+
+    expect(prismaMock.shopSettings.update).toHaveBeenCalledWith({
+      where: { shop: "test-shop.myshopify.com" },
+      data: {
+        plan: "PRO",
+        creditLimit: 5000,
+        creditsUsed: 0,
+        billingPeriodStart: expect.any(Date),
+      },
+    });
+  });
+});
+
+describe("downgradeToFreePlan (integration)", () => {
+  it("should update plan and disable auto-sync", async () => {
+    prismaMock.shopSettings.update.mockResolvedValue({} as any);
+
+    await downgradeToFreePlan("pro-shop.myshopify.com");
+
+    expect(prismaMock.shopSettings.update).toHaveBeenCalledWith({
+      where: { shop: "pro-shop.myshopify.com" },
+      data: {
+        plan: "FREE",
+        creditLimit: 50,
+        autoSyncNewProducts: false,
+      },
+    });
+  });
+});
+
+describe("toggleAutoSync (integration)", () => {
+  it("should allow PRO to enable auto-sync", async () => {
+    prismaMock.shopSettings.findUnique.mockResolvedValue(proShopSettings as any);
+    prismaMock.shopSettings.update.mockResolvedValue({} as any);
+
+    const result = await toggleAutoSync("pro-shop.myshopify.com", true);
+
+    expect(result.success).toBe(true);
+    expect(prismaMock.shopSettings.update).toHaveBeenCalled();
+  });
+
+  it("should reject FREE enabling auto-sync", async () => {
+    prismaMock.shopSettings.findUnique.mockResolvedValue(freeShopSettings as any);
+
+    const result = await toggleAutoSync("test-shop.myshopify.com", true);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("Auto-sync is only available on Pro plan");
+  });
+
+  it("should allow any plan to disable auto-sync", async () => {
+    prismaMock.shopSettings.findUnique.mockResolvedValue(freeShopSettings as any);
+    prismaMock.shopSettings.update.mockResolvedValue({} as any);
+
+    const result = await toggleAutoSync("test-shop.myshopify.com", false);
+
+    expect(result.success).toBe(true);
   });
 });

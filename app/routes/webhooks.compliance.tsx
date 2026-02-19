@@ -63,9 +63,21 @@ function handleCustomersRedact(shop: string): Response {
 /**
  * Handle shop/redact webhook
  * Delete ALL shop data from our database.
+ * IMPORTANT: Check if shop has reinstalled before deleting data.
  */
 async function handleShopRedact(shop: string): Promise<Response> {
   try {
+    // CRITICAL: Check if shop has reinstalled since uninstall
+    // If there's an active session, the shop reinstalled - don't delete their new data!
+    const activeSession = await db.session.findFirst({
+      where: { shop },
+    });
+
+    if (activeSession) {
+      console.log(`[VisionTags] Shop ${shop} has reinstalled - skipping data redaction`);
+      return new Response(null, { status: 200 });
+    }
+
     // Delete all shop data in the correct order (respecting foreign keys)
 
     // 1. Delete all products (references jobs)

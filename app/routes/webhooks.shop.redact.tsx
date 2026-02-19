@@ -13,8 +13,7 @@ import db from "../db.server";
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { shop, topic, payload } = await authenticate.webhook(request);
 
-  console.log(`Received ${topic} webhook for ${shop}`);
-  console.log("Shop redact payload:", JSON.stringify(payload));
+  console.log(`[VisionTags] Received ${topic} webhook for ${shop}`);
 
   try {
     // Delete all shop data in the correct order (respecting foreign keys)
@@ -27,35 +26,35 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         },
       },
     });
-    console.log(`Deleted ${deletedProducts.count} products for ${shop}`);
+    console.log(`[VisionTags] Deleted ${deletedProducts.count} products for ${shop}`);
 
     // 2. Delete all jobs
     const deletedJobs = await db.job.deleteMany({
       where: { shop },
     });
-    console.log(`Deleted ${deletedJobs.count} jobs for ${shop}`);
+    console.log(`[VisionTags] Deleted ${deletedJobs.count} jobs for ${shop}`);
 
     // 3. Delete usage records
     const deletedUsage = await db.usageRecord.deleteMany({
       where: { shop },
     });
-    console.log(`Deleted ${deletedUsage.count} usage records for ${shop}`);
+    console.log(`[VisionTags] Deleted ${deletedUsage.count} usage records for ${shop}`);
 
     // 4. Delete shop settings
     const deletedSettings = await db.shopSettings.deleteMany({
       where: { shop },
     });
-    console.log(`Deleted ${deletedSettings.count} shop settings for ${shop}`);
+    console.log(`[VisionTags] Deleted ${deletedSettings.count} shop settings for ${shop}`);
 
     // 5. Delete sessions (should already be done by app/uninstalled, but ensure cleanup)
     const deletedSessions = await db.session.deleteMany({
       where: { shop },
     });
-    console.log(`Deleted ${deletedSessions.count} sessions for ${shop}`);
+    console.log(`[VisionTags] Deleted ${deletedSessions.count} sessions for ${shop}`);
 
-    console.log(`Successfully redacted all data for shop ${shop}`);
+    console.log(`[VisionTags] Successfully redacted all data for shop ${shop}`);
   } catch (error) {
-    console.error(`Error redacting data for shop ${shop}:`, error);
+    console.error(`[VisionTags] Error redacting data for shop ${shop}:`, error);
     // Still return 200 to acknowledge receipt - Shopify will retry on failure
     // Log the error for manual investigation
   }
