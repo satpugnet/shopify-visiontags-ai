@@ -63,7 +63,7 @@ export default function TermsOfService() {
 
       <h3>Pro Plan ($19/month)</h3>
       <ul>
-        <li>4,000 AI scans per month</li>
+        <li>5,000 AI scans per month</li>
         <li>All metafields and SEO tags</li>
         <li>Auto-sync for new products</li>
         <li>Priority support</li>
