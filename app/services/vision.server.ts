@@ -5,9 +5,14 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 
-// Initialize Anthropic client
+// Initialize Anthropic client via OpenRouter's Anthropic Skin
 const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
+  apiKey: process.env.OPENROUTER_API_KEY,
+  baseURL: "https://openrouter.ai/api",
+  defaultHeaders: {
+    "HTTP-Referer": "https://apps.shopify.com/visiontags-ai",
+    "X-Title": "VisionTags",
+  },
 });
 
 /**
@@ -194,7 +199,7 @@ export async function analyzeProductImage(
     const response = await withRetry(
       () =>
         anthropic.messages.create({
-          model: "claude-haiku-4-5-20251001",
+          model: "anthropic/claude-haiku-4.5",
           max_tokens: 1024,
           messages: [
             {
@@ -252,21 +257,21 @@ export async function analyzeProductImage(
 
     if (error instanceof Anthropic.AuthenticationError) {
       return {
-        error: "Anthropic API authentication failed - check API key",
+        error: "AI API authentication failed - check API key",
         code: "API_ERROR",
       };
     }
 
     if (error instanceof Anthropic.RateLimitError) {
       return {
-        error: "Anthropic API rate limit exceeded - try again later",
+        error: "AI API rate limit exceeded - try again later",
         code: "API_ERROR",
       };
     }
 
     if (error instanceof Anthropic.APIError) {
       return {
-        error: `Anthropic API error (${error.status}): ${error.message}`,
+        error: `AI API error (${error.status}): ${error.message}`,
         code: "API_ERROR",
       };
     }

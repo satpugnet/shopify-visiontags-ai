@@ -39,7 +39,7 @@ Shopify app that uses Claude Vision to auto-fill metafields, tags, descriptions,
 
 - [ ] DATABASE_URL - PostgreSQL connection string
 - [ ] REDIS_URL - Redis connection string for BullMQ
-- [ ] ANTHROPIC_API_KEY - Claude API key
+- [ ] OPENROUTER_API_KEY - OpenRouter API key (routes to Claude Haiku via Anthropic Skin)
 - [ ] SHOPIFY_API_KEY - From Partner Dashboard
 - [ ] SHOPIFY_API_SECRET - From Partner Dashboard
 - [ ] SHOPIFY_APP_URL - Your app's public URL
@@ -51,7 +51,7 @@ Shopify app that uses Claude Vision to auto-fill metafields, tags, descriptions,
 - **Framework**: Remix (Shopify App Template)
 - **Database**: PostgreSQL (via Prisma)
 - **Queue**: BullMQ + Redis
-- **AI**: Claude Haiku 4.5 (claude-haiku-4-5-20251001)
+- **AI**: Claude Haiku 4.5 via OpenRouter (anthropic/claude-haiku-4.5)
 - **UI**: Polaris + App Bridge
 - **Deployment**: Railway (recommended)
 
@@ -155,3 +155,7 @@ railway up
 - Descriptions wrapped in `<p>` tags for `descriptionHtml`. Claude returns plain text.
 - Description/SEO fields are optional in VisionResult. Scans succeed even if Claude omits them.
 - V1 simplifications: No revert button, no settings page, basic taxonomy validation, no multi-language
+
+## TODO
+
+- [ ] Update Shopify App Store screenshots to show the latest UI (including description & SEO fields)
