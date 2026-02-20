@@ -370,8 +370,8 @@ export default function Dashboard() {
                     1. Click "Start AI Scan" to analyze your product images
                   </Text>
                   <Text as="p" variant="bodyMd">
-                    2. AI fills metafields (color, material, pattern) and
-                    generates SEO tags
+                    2. AI fills metafields, generates SEO tags, and writes
+                    product descriptions
                   </Text>
                   <Text as="p" variant="bodyMd">
                     3. Review suggestions and click "Sync" to update Shopify
@@ -394,8 +394,8 @@ export default function Dashboard() {
                 image="https://cdn.shopify.com/s/files/1/0262/4071/2726/files/emptystate-files.png"
               >
                 <p>
-                  Start your first AI scan to auto-fill metafields and generate
-                  SEO tags for your products.
+                  Start your first AI scan to auto-fill metafields, generate
+                  SEO tags, and write product descriptions.
                 </p>
               </EmptyState>
             ) : (
@@ -423,6 +423,10 @@ export default function Dashboard() {
                   <Text as="p" variant="bodyMd">
                     <strong>Tags:</strong> SEO keywords + vibe/occasion tags
                     (e.g., "Summer Vibes", "Business Casual")
+                  </Text>
+                  <Text as="p" variant="bodyMd">
+                    <strong>Description & SEO:</strong> Product description, SEO
+                    page title, meta description
                   </Text>
                 </BlockStack>
               </BlockStack>

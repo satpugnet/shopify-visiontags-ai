@@ -15,7 +15,7 @@ export const PLANS = {
     name: "Free",
     credits: 50,
     price: 0,
-    features: ["50 AI scans/month", "Basic metafields", "Basic tags"],
+    features: ["50 AI scans/month", "Basic metafields", "Basic tags", "AI descriptions"],
   },
   PRO: {
     name: "Pro",
@@ -25,6 +25,7 @@ export const PLANS = {
       "5,000 AI scans/month",
       "All metafields",
       "SEO tags",
+      "AI product descriptions & SEO",
       "Auto-sync new products",
       "Priority support",
     ],

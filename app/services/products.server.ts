@@ -430,6 +430,105 @@ export async function fetchCollectionProducts(
   }
 }
 
+interface ProductDescriptionSeoResponse {
+  data?: {
+    productUpdate?: {
+      product?: {
+        id: string;
+        descriptionHtml: string;
+        seo: {
+          title: string;
+          description: string;
+        };
+      };
+      userErrors?: Array<{
+        field: string;
+        message: string;
+      }>;
+    };
+  };
+}
+
+/**
+ * Update product description, SEO title, and meta description
+ * Uses the productUpdate mutation with descriptionHtml and seo fields
+ */
+export async function updateProductDescriptionAndSeo(
+  admin: AdminApiContext,
+  productId: string,
+  description?: string | null,
+  seoTitle?: string | null,
+  metaDescription?: string | null,
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    // Skip if nothing to update
+    if (!description && !seoTitle && !metaDescription) {
+      return { success: true };
+    }
+
+    // Build the product input, only including non-empty fields
+    const productInput: Record<string, unknown> = { id: productId };
+
+    if (description) {
+      // Wrap plain text in <p> tags for proper HTML rendering in storefront
+      productInput.descriptionHtml = `<p>${description}</p>`;
+    }
+
+    const seoInput: Record<string, string> = {};
+    if (seoTitle) seoInput.title = seoTitle;
+    if (metaDescription) seoInput.description = metaDescription;
+    if (Object.keys(seoInput).length > 0) {
+      productInput.seo = seoInput;
+    }
+
+    console.log(`[VisionTags] Updating description & SEO for ${productId}`);
+
+    const response = await admin.graphql(
+      `#graphql
+      mutation productUpdate($product: ProductUpdateInput!) {
+        productUpdate(product: $product) {
+          product {
+            id
+            descriptionHtml
+            seo {
+              title
+              description
+            }
+          }
+          userErrors {
+            field
+            message
+          }
+        }
+      }`,
+      {
+        variables: {
+          product: productInput,
+        },
+      }
+    );
+
+    const data = (await response.json()) as ProductDescriptionSeoResponse;
+
+    if (data.data?.productUpdate?.userErrors?.length) {
+      const errors = data.data.productUpdate.userErrors
+        .map((e) => e.message)
+        .join(", ");
+      console.error(`[VisionTags] Description/SEO error for ${productId}:`, errors);
+      return { success: false, error: errors };
+    }
+
+    console.log(`[VisionTags] Description & SEO updated for ${productId}`);
+    return { success: true };
+  } catch (error) {
+    console.error(`[VisionTags] Error updating description/SEO for ${productId}:`, error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Unknown error",
+    };
+  }
+}
+
 interface ProductUpdateMediaResponse {
   data?: {
     productUpdateMedia?: {

@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   updateProductMetafields: vi.fn(),
   updateProductTags: vi.fn(),
   updateProductImageAlt: vi.fn(),
+  updateProductDescriptionAndSeo: vi.fn(),
 }));
 
 // Mock modules
@@ -32,6 +33,7 @@ vi.mock("../../services/metafields.server", () => ({
 vi.mock("../../services/products.server", () => ({
   updateProductTags: mocks.updateProductTags,
   updateProductImageAlt: mocks.updateProductImageAlt,
+  updateProductDescriptionAndSeo: mocks.updateProductDescriptionAndSeo,
 }));
 
 // Import after mocking
@@ -69,6 +71,7 @@ function createSyncRequest(
     syncMetafields?: boolean;
     syncTags?: boolean;
     syncAltText?: boolean;
+    syncDescription?: boolean;
     edits?: Record<string, unknown>;
   } = {},
 ) {
@@ -77,6 +80,7 @@ function createSyncRequest(
   formData.append("syncMetafields", String(options.syncMetafields ?? true));
   formData.append("syncTags", String(options.syncTags ?? true));
   formData.append("syncAltText", String(options.syncAltText ?? true));
+  formData.append("syncDescription", String(options.syncDescription ?? true));
   formData.append("edits", JSON.stringify(options.edits ?? {}));
   productIds.forEach((id) => formData.append("productIds", id));
   return new Request("https://app.example.com/app/jobs/job-123", {
@@ -100,6 +104,7 @@ describe("app.jobs.$id action", () => {
     mocks.updateProductMetafields.mockResolvedValue({ success: true });
     mocks.updateProductTags.mockResolvedValue({ success: true });
     mocks.updateProductImageAlt.mockResolvedValue({ success: true });
+    mocks.updateProductDescriptionAndSeo.mockResolvedValue({ success: true });
     mocks.prisma.product.update.mockResolvedValue({});
 
     const response = await action({
@@ -107,6 +112,7 @@ describe("app.jobs.$id action", () => {
         syncMetafields: true,
         syncTags: false,
         syncAltText: false,
+        syncDescription: false,
       }),
       params: { id: "job-123" },
     } as any);
@@ -130,6 +136,7 @@ describe("app.jobs.$id action", () => {
     mocks.updateProductMetafields.mockResolvedValue({ success: true });
     mocks.updateProductTags.mockResolvedValue({ success: true });
     mocks.updateProductImageAlt.mockResolvedValue({ success: true });
+    mocks.updateProductDescriptionAndSeo.mockResolvedValue({ success: true });
     mocks.prisma.product.update.mockResolvedValue({});
 
     const response = await action({
@@ -137,6 +144,7 @@ describe("app.jobs.$id action", () => {
         syncMetafields: false,
         syncTags: true,
         syncAltText: false,
+        syncDescription: false,
       }),
       params: { id: "job-123" },
     } as any);
@@ -158,6 +166,7 @@ describe("app.jobs.$id action", () => {
     mocks.updateProductMetafields.mockResolvedValue({ success: true });
     mocks.updateProductTags.mockResolvedValue({ success: true });
     mocks.updateProductImageAlt.mockResolvedValue({ success: true });
+    mocks.updateProductDescriptionAndSeo.mockResolvedValue({ success: true });
     mocks.prisma.product.update.mockResolvedValue({});
 
     const response = await action({
@@ -165,6 +174,7 @@ describe("app.jobs.$id action", () => {
         syncMetafields: false,
         syncTags: false,
         syncAltText: true,
+        syncDescription: false,
       }),
       params: { id: "job-123" },
     } as any);
@@ -186,6 +196,7 @@ describe("app.jobs.$id action", () => {
     mocks.updateProductMetafields.mockResolvedValue({ success: true });
     mocks.updateProductTags.mockResolvedValue({ success: true });
     mocks.updateProductImageAlt.mockResolvedValue({ success: true });
+    mocks.updateProductDescriptionAndSeo.mockResolvedValue({ success: true });
     mocks.prisma.product.update.mockResolvedValue({});
 
     const edits = {
@@ -233,6 +244,7 @@ describe("app.jobs.$id action", () => {
 
   it("skips non-ANALYZED products", async () => {
     mocks.prisma.product.findUnique.mockResolvedValue(mockPendingProduct);
+    mocks.updateProductDescriptionAndSeo.mockResolvedValue({ success: true });
 
     const response = await action({
       request: createSyncRequest(["gid://shopify/Product/3"]),

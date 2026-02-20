@@ -162,6 +162,9 @@ export function startAnalysisWorker(): Worker<AnalysisJobData> {
               status: "ANALYZED",
               suggestedMetafields: metafieldsWithAlt,
               suggestedTags: result.tags,
+              suggestedDescription: result.description,
+              suggestedSeoTitle: result.seo_title,
+              suggestedMetaDescription: result.meta_description,
             },
           });
         }

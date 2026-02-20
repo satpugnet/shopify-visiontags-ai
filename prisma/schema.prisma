@@ -53,7 +53,10 @@ model Product {
   currentMetafields   Json?
   currentTags         String?
   suggestedMetafields Json?
-  suggestedTags       Json?
+  suggestedTags            Json?
+  suggestedDescription     String?
+  suggestedSeoTitle        String?
+  suggestedMetaDescription String?
   syncedAt            DateTime?
   status              String    @default("PENDING")
   error               String?

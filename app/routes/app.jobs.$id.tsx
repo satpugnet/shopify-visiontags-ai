@@ -65,6 +65,9 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       currentTags: p.currentTags,
       suggestedMetafields: p.suggestedMetafields as Record<string, string> | null,
       suggestedTags: p.suggestedTags as string[] | null,
+      suggestedDescription: p.suggestedDescription,
+      suggestedSeoTitle: p.suggestedSeoTitle,
+      suggestedMetaDescription: p.suggestedMetaDescription,
       syncedAt: p.syncedAt?.toISOString() || null,
       error: p.error,
     })),
@@ -82,6 +85,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     const syncMetafields = formData.get("syncMetafields") === "true";
     const syncTags = formData.get("syncTags") === "true";
     const syncAltText = formData.get("syncAltText") === "true";
+    const syncDescription = formData.get("syncDescription") === "true";
     const editsJson = formData.get("edits") as string;
     let edits: Record<string, unknown> = {};
     if (editsJson) {
@@ -100,7 +104,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     const { updateProductMetafields } = await import(
       "../services/metafields.server"
     );
-    const { updateProductTags, updateProductImageAlt } = await import("../services/products.server");
+    const { updateProductTags, updateProductImageAlt, updateProductDescriptionAndSeo } = await import("../services/products.server");
 
     let synced = 0;
     let errors = 0;
@@ -133,9 +137,11 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       let metaSuccess = true;
       let tagSuccess = true;
       let altTextSuccess = true;
+      let descSuccess = true;
       let metaError: string | undefined;
       let tagError: string | undefined;
       let altTextError: string | undefined;
+      let descError: string | undefined;
 
       // Sync metafields (exclude alt_text from metafields sync)
       if (syncMetafields && suggestedMetafields) {
@@ -180,7 +186,30 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         }
       }
 
-      if (metaSuccess && tagSuccess && altTextSuccess) {
+      // Sync description & SEO
+      if (syncDescription) {
+        const description = productEdits?.description ?? product.suggestedDescription;
+        const seoTitle = productEdits?.seo_title ?? product.suggestedSeoTitle;
+        const metaDescription = productEdits?.meta_description ?? product.suggestedMetaDescription;
+
+        if (description || seoTitle || metaDescription) {
+          console.log(`Syncing description & SEO for ${product.title}`);
+          const result = await updateProductDescriptionAndSeo(
+            admin,
+            productId,
+            description,
+            seoTitle,
+            metaDescription
+          );
+          descSuccess = result.success;
+          descError = result.error;
+          if (!descSuccess) {
+            console.error(`Description/SEO sync failed for ${product.title}:`, descError);
+          }
+        }
+      }
+
+      if (metaSuccess && tagSuccess && altTextSuccess && descSuccess) {
         await prisma.product.update({
           where: { id: productId },
           data: {
@@ -191,7 +220,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         synced++;
       } else {
         errors++;
-        const errMsg = [metaError, tagError, altTextError].filter(Boolean).join("; ");
+        const errMsg = [metaError, tagError, altTextError, descError].filter(Boolean).join("; ");
         errorMessages.push(`${product.title}: ${errMsg}`);
         // Store error in database
         await prisma.product.update({
@@ -237,6 +266,7 @@ export default function JobDetail() {
   const [syncMetafields, setSyncMetafields] = useState(true);
   const [syncTags, setSyncTags] = useState(true);
   const [syncAltText, setSyncAltText] = useState(true);
+  const [syncDescription, setSyncDescription] = useState(true);
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
   const [newTagInputs, setNewTagInputs] = useState<Record<string, string>>({});
 
@@ -245,6 +275,9 @@ export default function JobDetail() {
     metafields?: Record<string, string>;
     tags?: string[];
     alt_text?: string;
+    description?: string;
+    seo_title?: string;
+    meta_description?: string;
   }>>({});
 
   // Helper to get current metafield value (edited or original)
@@ -260,6 +293,21 @@ export default function JobDetail() {
   // Helper to get alt text (edited or original)
   const getAltText = (productId: string, original: string | undefined): string => {
     return edits[productId]?.alt_text ?? original ?? "";
+  };
+
+  // Helper to get description (edited or original)
+  const getDescription = (productId: string, original: string | null | undefined): string => {
+    return edits[productId]?.description ?? original ?? "";
+  };
+
+  // Helper to get SEO title (edited or original)
+  const getSeoTitle = (productId: string, original: string | null | undefined): string => {
+    return edits[productId]?.seo_title ?? original ?? "";
+  };
+
+  // Helper to get meta description (edited or original)
+  const getMetaDescription = (productId: string, original: string | null | undefined): string => {
+    return edits[productId]?.meta_description ?? original ?? "";
   };
 
   // Update a metafield edit
@@ -283,6 +331,39 @@ export default function JobDetail() {
       [productId]: {
         ...prev[productId],
         alt_text: value,
+      },
+    }));
+  };
+
+  // Update description edit
+  const updateDescriptionEdit = (productId: string, value: string) => {
+    setEdits(prev => ({
+      ...prev,
+      [productId]: {
+        ...prev[productId],
+        description: value,
+      },
+    }));
+  };
+
+  // Update SEO title edit
+  const updateSeoTitleEdit = (productId: string, value: string) => {
+    setEdits(prev => ({
+      ...prev,
+      [productId]: {
+        ...prev[productId],
+        seo_title: value,
+      },
+    }));
+  };
+
+  // Update meta description edit
+  const updateMetaDescriptionEdit = (productId: string, value: string) => {
+    setEdits(prev => ({
+      ...prev,
+      [productId]: {
+        ...prev[productId],
+        meta_description: value,
       },
     }));
   };
@@ -354,6 +435,7 @@ export default function JobDetail() {
     formData.append("syncMetafields", String(syncMetafields));
     formData.append("syncTags", String(syncTags));
     formData.append("syncAltText", String(syncAltText));
+    formData.append("syncDescription", String(syncDescription));
     formData.append("edits", JSON.stringify(edits));
     selectedResources.forEach((id) => formData.append("productIds", id));
     fetcher.submit(formData, { method: "POST" });
@@ -534,6 +616,11 @@ export default function JobDetail() {
                   checked={syncAltText}
                   onChange={setSyncAltText}
                 />
+                <Checkbox
+                  label="Sync Description & SEO (product description, page title, meta description)"
+                  checked={syncDescription}
+                  onChange={setSyncDescription}
+                />
               </InlineStack>
 
               <InlineStack gap="300">
@@ -543,7 +630,7 @@ export default function JobDetail() {
                   loading={isSyncing}
                   disabled={
                     selectedResources.length === 0 ||
-                    (!syncMetafields && !syncTags && !syncAltText)
+                    (!syncMetafields && !syncTags && !syncAltText && !syncDescription)
                   }
                 >
                   {`Sync ${selectedResources.length} Selected Products`}
@@ -684,6 +771,47 @@ export default function JobDetail() {
                     </BlockStack>
                   </Layout.Section>
                 </Layout>
+
+                {/* Description & SEO - only show if product has description/SEO data */}
+                {(product.suggestedDescription || product.suggestedSeoTitle || product.suggestedMetaDescription) && (
+                  <>
+                    <Divider />
+                    <Text as="h4" variant="headingSm">
+                      Description & SEO
+                    </Text>
+                    <BlockStack gap="200">
+                      {product.suggestedDescription != null && (
+                        <TextField
+                          label="Product Description"
+                          value={getDescription(product.id, product.suggestedDescription)}
+                          onChange={(v) => updateDescriptionEdit(product.id, v)}
+                          autoComplete="off"
+                          multiline={4}
+                          helpText="Syncs to your product's main description"
+                        />
+                      )}
+                      {product.suggestedSeoTitle != null && (
+                        <TextField
+                          label="SEO Title"
+                          value={getSeoTitle(product.id, product.suggestedSeoTitle)}
+                          onChange={(v) => updateSeoTitleEdit(product.id, v)}
+                          autoComplete="off"
+                          helpText={`${getSeoTitle(product.id, product.suggestedSeoTitle).length}/70 characters`}
+                        />
+                      )}
+                      {product.suggestedMetaDescription != null && (
+                        <TextField
+                          label="Meta Description"
+                          value={getMetaDescription(product.id, product.suggestedMetaDescription)}
+                          onChange={(v) => updateMetaDescriptionEdit(product.id, v)}
+                          autoComplete="off"
+                          multiline={2}
+                          helpText={`${getMetaDescription(product.id, product.suggestedMetaDescription).length}/160 characters`}
+                        />
+                      )}
+                    </BlockStack>
+                  </>
+                )}
               </BlockStack>
             </Card>
           );

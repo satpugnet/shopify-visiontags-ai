@@ -79,7 +79,10 @@ Return a JSON object with THREE sections:
     // Add: 3-5 descriptive vibe/occasion words
     // Examples: "Navy Blue", "Striped", "Cotton", "Summer Vibes", "Business Casual", "Resort Wear"
   ],
-  "alt_text": "Descriptive alt text for accessibility and SEO, max 125 characters. Describe what the product looks like."
+  "alt_text": "Descriptive alt text for accessibility and SEO, max 125 characters. Describe what the product looks like.",
+  "description": "2-4 sentence product description for the storefront. Describe what the product looks like based on the image. Include key attributes (color, material, style) naturally. Write in a professional e-commerce tone. Plain text only, no HTML.",
+  "seo_title": "SEO page title, max 60 characters. Format: [Key Attribute] [Product Type]. Example: 'Navy Blue Cotton Crew Neck T-Shirt'",
+  "meta_description": "Meta description for search results, max 155 characters. Compelling summary with key product attributes. Include a subtle call to action."
 }
 
 IMPORTANT RULES:
@@ -88,6 +91,7 @@ IMPORTANT RULES:
 3. Tags should be Title Case and include both factual (color, material) and vibe/mood keywords
 4. alt_text should be descriptive and accessibility-friendly, describing the product visually
 5. Return valid JSON only - no markdown, no explanation
+6. description should be plain text (no HTML, no markdown). seo_title max 60 chars. meta_description max 155 chars.
 
 Return valid JSON only.`;
 
@@ -106,6 +110,9 @@ export interface VisionResult {
   };
   tags: string[];
   alt_text?: string;
+  description?: string;
+  seo_title?: string;
+  meta_description?: string;
 }
 
 export interface VisionError {
@@ -188,7 +195,7 @@ export async function analyzeProductImage(
       () =>
         anthropic.messages.create({
           model: "claude-haiku-4-5-20251001",
-          max_tokens: 512,
+          max_tokens: 1024,
           messages: [
             {
               role: "user",

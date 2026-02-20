@@ -359,6 +359,9 @@ describe("analyzeProductImage (integration)", () => {
             age_group: "Adult",
           },
           tags: ["Navy Blue", "Cotton", "Summer Vibes", "Business Casual"],
+          description: "A classic navy blue cotton t-shirt with a clean solid pattern. Features a comfortable crew neck design in a regular fit, perfect for everyday casual wear.",
+          seo_title: "Navy Blue Cotton Crew Neck T-Shirt",
+          meta_description: "Shop this classic navy blue cotton t-shirt. Comfortable crew neck design in regular fit, perfect for casual everyday style.",
         }),
       },
     ],
@@ -537,6 +540,50 @@ describe("analyzeProductImage (integration)", () => {
         model: "claude-haiku-4-5-20251001",
       })
     );
+  });
+
+  it("should parse description and SEO fields", async () => {
+    mockCreate.mockResolvedValue(validResponse);
+
+    const result = await analyzeProductImage(
+      "https://cdn.shopify.com/image.jpg"
+    );
+
+    expect(isVisionError(result)).toBe(false);
+    if (!isVisionError(result)) {
+      expect(result.description).toBeDefined();
+      expect(result.seo_title).toBeDefined();
+      expect(result.meta_description).toBeDefined();
+      expect(typeof result.description).toBe("string");
+      expect(result.seo_title!.length).toBeLessThanOrEqual(70);
+      expect(result.meta_description!.length).toBeLessThanOrEqual(160);
+    }
+  });
+
+  it("should succeed when description fields are missing", async () => {
+    mockCreate.mockResolvedValue({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            metafields: { color: "Blue" },
+            tags: ["Blue"],
+            alt_text: "A blue product",
+          }),
+        },
+      ],
+    });
+
+    const result = await analyzeProductImage(
+      "https://cdn.shopify.com/image.jpg"
+    );
+
+    expect(isVisionError(result)).toBe(false);
+    if (!isVisionError(result)) {
+      expect(result.description).toBeUndefined();
+      expect(result.seo_title).toBeUndefined();
+      expect(result.meta_description).toBeUndefined();
+    }
   });
 });
 
