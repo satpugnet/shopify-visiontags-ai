@@ -1,6 +1,6 @@
-# VisionTags: AI Tags & Metafields
+# VisionTags: AI Product Enrichment
 
-Shopify app that uses Claude Vision to auto-fill BOTH metafields AND tags from product images.
+Shopify app that uses Claude Vision to auto-fill metafields, tags, descriptions, and SEO from product images.
 
 ## Project Status
 
@@ -17,7 +17,10 @@ Shopify app that uses Claude Vision to auto-fill BOTH metafields AND tags from p
 - Partner Dashboard: https://partners.shopify.com
 - Partner Account Email: saturnin.13@hotmail.fr
 - Customer-facing Email: marco.a.duval@gmail.com (used for outreach to merchants)
-- App ID: `<TO_BE_FILLED_AFTER_APP_CREATION>`
+- App Store Listing: https://apps.shopify.com/visiontags-ai
+- App ID: 314277724161
+- Partner ID: 4709749
+- Partner Dashboard App URL: https://partners.shopify.com/4709749/apps/314277724161/overview
 - App API Key: (in .env, do not commit)
 - App Secret: (in .env, do not commit)
 - Dev Store URL: `<TO_BE_FILLED>`
@@ -80,9 +83,9 @@ Hard cap at plan limit — no overage. Credits reset each billing cycle.
 Uses Shopify Managed Pricing (fixed recurring only, no usage-based billing).
 
 ### Cost Analysis (Claude Haiku 4.5)
-- Cost per scan: ~$0.003
-- Free (50 scans): ~$0.15 cost (acquisition)
-- Pro (5,000 scans): ~$15 cost, $4 profit (21% margin)
+- Cost per scan: ~$0.004 (1024 max_tokens)
+- Free (50 scans): ~$0.20 cost (acquisition)
+- Pro (5,000 scans): ~$20 cost, break-even at $19 (reinforces case for $29 pricing)
 
 ## Current Progress
 
@@ -93,6 +96,8 @@ Uses Shopify Managed Pricing (fixed recurring only, no usage-based billing).
 **Next steps**:
 1. Grow distribution (App Store SEO, content marketing, direct outreach)
 2. Iterate based on customer feedback
+3. Ship Phase 1 quick wins: settings page + custom prompts, rescan failed, free tier bump
+4. Implement new 3-tier pricing ($0/$29/$79)
 
 ## Development Commands
 
@@ -123,12 +128,21 @@ railway up
 - Fixed: Billing API conflict with Managed Pricing (switched to Shopify's hosted plan picker)
 - Fixed: AI scans failing due to deprecated model ID (updated to claude-haiku-4-5-20251001)
 - Fixed: Image URL optimization breaking non-Shopify CDN URLs (added domain check)
+- Fixed: Deployment script using `prisma migrate deploy` instead of `prisma db push` (broke new column deployments)
+
+## Recent Changes
+
+- **Feb 19, 2026**: Shipped product descriptions + SEO generation (descriptions, SEO titles, meta descriptions generated from product images). Updated App Store listing with new features and search terms.
 
 ## Customers
 
 | Store | Email | Plan | Joined | Notes |
 |-------|-------|------|--------|-------|
 | Phoenix Publishing | phoenix.publishing.com@gmail.com | Pro ($19/mo) | Feb 2026 | First paying customer. Applied $5 discount for 1 month. Sent thank-you email from marco.a.duval@gmail.com (Feb 19, 2026) requesting feedback and App Store review. |
+
+## Marketing Assets
+
+- **Product Demo Video**: https://youtu.be/AUxcuY3qSDo
 
 ## Notes
 
@@ -137,4 +151,6 @@ railway up
 - Auto-sync (products/create webhook) is a Pro-only feature
 - Billing uses Managed Pricing: plans defined in Partner Dashboard, upgrade redirects to Shopify's hosted plan picker
 - app_subscriptions/update webhook syncs plan changes to local DB
-- V1 simplifications: No revert button, no settings page, basic taxonomy validation
+- Descriptions wrapped in `<p>` tags for `descriptionHtml`. Claude returns plain text.
+- Description/SEO fields are optional in VisionResult. Scans succeed even if Claude omits them.
+- V1 simplifications: No revert button, no settings page, basic taxonomy validation, no multi-language

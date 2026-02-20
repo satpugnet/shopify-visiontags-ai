@@ -1,68 +1,27 @@
 # VisionTags App Store Listing
 
 ## App Name
-VisionTags: AI Tags & Metafields
+VisionTags: AI Tags & SEO
 
-## Tagline (80 characters max)
-AI-powered product tagging. Auto-fill metafields and generate SEO tags instantly.
+## Tagline (62 characters max)
+Auto-fill metafields, tags, descriptions & SEO from product images
 
 ## Short Description (100 characters max)
-Analyze product images with AI to auto-fill metafields (color, material, pattern) and generate SEO tags.
+AI scans your product images to generate metafields, tags, descriptions, and SEO in one click.
 
 ## Long Description (for App Store listing)
 
-### Stop manually tagging products. Let AI do it in seconds.
-
-VisionTags uses advanced AI vision to analyze your product images and automatically generate:
-
-**Rich Metafields:**
-- Color (Navy Blue, Forest Green, Coral Pink...)
-- Material (Cotton, Leather, Stainless Steel...)
-- Pattern (Solid, Striped, Floral, Abstract...)
-- Target Gender (Men, Women, Unisex)
-- Age Group (Adult, Kids, Baby)
-- And more...
-
-**SEO-Optimized Tags:**
-- Product descriptors (Lightweight, Premium, Handcrafted)
-- Style tags (Casual, Formal, Bohemian, Minimalist)
-- Occasion tags (Summer Vibes, Business Casual, Weekend Ready)
-- Searchable keywords that help customers find your products
-
-### How It Works
-
-1. **Click "Start AI Scan"** - Select products or scan your entire catalog
-2. **AI analyzes images** - Our AI examines each product photo in seconds
-3. **Review suggestions** - See AI-generated metafields and tags before syncing
-4. **Sync to Shopify** - One click to update your product data
-
-### Why VisionTags?
-
-- **Save hours of manual work** - Tag hundreds of products in minutes, not days
-- **Improve search & filtering** - Rich metafields power better collection filters
-- **Boost SEO** - AI-generated tags help customers discover your products
-- **Stay consistent** - AI applies uniform tagging across your entire catalog
-- **Keep control** - Review all suggestions before syncing to your store
-
-### Perfect For
-
-- Fashion & apparel stores
-- Home goods & furniture
-- Sports & outdoor equipment
-- Electronics & accessories
-- Any store with product images
+VisionTags uses Claude AI vision to analyze your product images and automatically generate accurate metafields, tags, product descriptions, SEO titles, and meta descriptions. Instead of manually typing product attributes like materials, colors, styles, and categories, simply select products and let AI do the work. The app processes images in the background, so you can continue managing your store while products are being analyzed. Perfect for stores with large catalogs that need consistent, SEO-friendly product data without the tedious manual work.
 
 ---
 
-## Key Features (bullet points for App Store)
+## Key Features (in Partner Dashboard, max 5)
 
-- AI-powered image analysis using Claude Vision
-- Auto-fill 8+ metafield types (color, material, pattern, gender, age group, etc.)
-- Generate SEO-optimized product tags automatically
-- Bulk scan up to 100 products at once
-- Review suggestions before syncing
-- Track scan history and job status
-- Works with any product category
+1. AI analyzes images to generate metafields like materials, colors & styles
+2. SEO-optimized product tags automatically generated from your product images
+3. Bulk process your entire catalog with background jobs - no waiting required
+4. Product descriptions, SEO titles & meta descriptions from images
+5. Review and edit all AI suggestions before syncing to Shopify
 
 ---
 
@@ -86,15 +45,12 @@ VisionTags uses advanced AI vision to analyze your product images and automatica
 ## App Store Category
 Products & Inventory > Product tagging
 
-## Search Keywords
-- AI tagging
-- product metafields
-- auto tag products
-- image recognition
-- SEO tags
-- product attributes
-- catalog management
-- bulk tagging
+## Search Keywords (in Partner Dashboard, max 5)
+- AI tags
+- product tags
+- metafields
+- SEO description
+- alt text
 
 ---
 
