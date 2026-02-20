@@ -149,6 +149,17 @@ railway up
 |-------|-------|------|--------|-------|
 | Phoenix Publishing | phoenix.publishing.com@gmail.com | Pro ($19/mo) | Feb 2026 | First paying customer. Applied $5 discount for 1 month. Sent thank-you email from marco.a.duval@gmail.com (Feb 19, 2026) requesting feedback and App Store review. |
 
+## Distribution Strategy
+
+| Channel | Status | Details |
+|---------|--------|---------|
+| Shopify App Store | Live | Listing at https://apps.shopify.com/visiontags-ai. Optimized with 5 search terms: AI tags, product tags, metafields, SEO description, alt text. See `APP_LISTING.md` for full copy. |
+| Medium (content marketing) | Published Feb 19, 2026 | "How to Make Your Shopify Products Discoverable by ChatGPT Shopping and Perplexity" - https://medium.com/p/55a2354327bc. Topics: AI, E-Commerce, Shopify, ChatGPT, SEO. |
+| Shopify Community forums | Drafted, not posted | 3 reply templates ready in `COMMUNITY_OUTREACH.md`. Account (marcoduval) was under review as of Feb 19, 2026. Targets threads about auto-filling metafields, product keywords. |
+| Direct outreach | Active | Using marco.a.duval@gmail.com. Sent thank-you + review request to Phoenix Publishing (first paying customer). |
+| Product demo video | Published | https://youtu.be/AUxcuY3qSDo |
+| App Store screenshots | Needs update | TODO: Update screenshots to show description & SEO fields in latest UI. |
+
 ## Marketing Assets
 
 - **Product Demo Video**: https://youtu.be/AUxcuY3qSDo
