@@ -134,10 +134,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     // Get selected collection (if any)
     const selectedCollection = formData.get("selectedCollection") as string;
 
-    // Fetch products with images (from collection or all)
+    // Fetch products with images (limit based on plan)
+    const billing = await getShopBilling(shop);
+    const scanLimit = billing.plan === "PRO" ? 500 : 50;
     const products = selectedCollection && selectedCollection !== "all"
-      ? await fetchCollectionProducts(admin, selectedCollection, 100)
-      : await fetchAllProducts(admin, 100); // Limit to 100 for V1
+      ? await fetchCollectionProducts(admin, selectedCollection, scanLimit)
+      : await fetchAllProducts(admin, scanLimit);
 
     if (products.length === 0) {
       return json({

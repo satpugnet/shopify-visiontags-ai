@@ -115,6 +115,15 @@ beforeEach(() => {
     admin: mockAdmin,
     session: mockSession,
   });
+  // Default: Free plan billing
+  mocks.getShopBilling.mockResolvedValue({
+    plan: "FREE",
+    creditsUsed: 0,
+    creditLimit: 50,
+    creditsRemaining: 50,
+    billingPeriodStart: new Date(),
+    autoSyncEnabled: false,
+  });
 });
 
 describe("app._index action", () => {
@@ -202,12 +211,27 @@ describe("app._index action", () => {
     expect(mocks.fetchCollectionProducts).toHaveBeenCalledWith(
       mockAdmin,
       collectionGid,
-      100,
+      50,
     );
     expect(mocks.fetchAllProducts).not.toHaveBeenCalled();
   });
 
-  it("limits to 100 products", async () => {
+  it("limits scan to plan-based cap (50 for Free, 500 for Pro)", async () => {
+    mocks.fetchAllProducts.mockResolvedValue(mockProducts);
+    mocks.hasAvailableCredits.mockResolvedValue({ allowed: true });
+    mocks.prisma.job.create.mockResolvedValue(mockJob);
+    mocks.prisma.$transaction.mockResolvedValue([{}, {}]);
+    mocks.queueBulkAnalysis.mockResolvedValue(undefined);
+    mocks.useCredits.mockResolvedValue({ success: true });
+
+    // Free plan: limit 50
+    await action({ request: createScanRequest() } as any);
+    expect(mocks.fetchAllProducts).toHaveBeenCalledWith(mockAdmin, 50);
+
+    // Pro plan: limit 500
+    vi.clearAllMocks();
+    mocks.authenticate.admin.mockResolvedValue({ admin: mockAdmin, session: mockSession });
+    mocks.getShopBilling.mockResolvedValue({ plan: "PRO", creditsUsed: 0, creditLimit: 5000, creditsRemaining: 5000, billingPeriodStart: new Date(), autoSyncEnabled: false });
     mocks.fetchAllProducts.mockResolvedValue(mockProducts);
     mocks.hasAvailableCredits.mockResolvedValue({ allowed: true });
     mocks.prisma.job.create.mockResolvedValue(mockJob);
@@ -216,9 +240,7 @@ describe("app._index action", () => {
     mocks.useCredits.mockResolvedValue({ success: true });
 
     await action({ request: createScanRequest() } as any);
-
-    // fetchAllProducts is called with limit 100
-    expect(mocks.fetchAllProducts).toHaveBeenCalledWith(mockAdmin, 100);
+    expect(mocks.fetchAllProducts).toHaveBeenCalledWith(mockAdmin, 500);
   });
 
   it("handles queue failure gracefully", async () => {

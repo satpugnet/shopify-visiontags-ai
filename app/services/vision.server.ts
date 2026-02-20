@@ -4,6 +4,7 @@
  */
 
 import Anthropic from "@anthropic-ai/sdk";
+import * as Sentry from "@sentry/remix";
 
 // Initialize Anthropic client via OpenRouter's Anthropic Skin
 const anthropic = new Anthropic({
@@ -191,6 +192,19 @@ function optimizeImageUrl(imageUrl: string): string {
 export async function analyzeProductImage(
   imageUrl: string
 ): Promise<VisionResponse> {
+  // Dry run mode for stress testing (skips real API call)
+  if (process.env.VISION_DRY_RUN === "true") {
+    await new Promise((r) => setTimeout(r, 200));
+    return {
+      metafields: { color: "Test Blue", material: "Cotton", pattern: "Solid", product_type: "T-Shirt" },
+      tags: ["Test", "Dry Run", "Stress Test"],
+      alt_text: "Dry run test image",
+      description: "This is a dry run test product description.",
+      seo_title: "Test Product - Dry Run",
+      meta_description: "Dry run test meta description for stress testing.",
+    };
+  }
+
   try {
     // Optimize image URL to save tokens
     const optimizedUrl = optimizeImageUrl(imageUrl);
@@ -254,6 +268,10 @@ export async function analyzeProductImage(
     }
   } catch (error) {
     console.error("Vision API error:", error);
+    Sentry.captureException(error, {
+      tags: { service: "vision" },
+      extra: { imageUrl },
+    });
 
     if (error instanceof Anthropic.AuthenticationError) {
       return {

@@ -4,6 +4,7 @@
  */
 
 import { Queue, Worker, Job as BullJob } from "bullmq";
+import * as Sentry from "@sentry/remix";
 import { analyzeProductImage, isVisionError } from "./vision.server";
 import prisma from "../db.server";
 
@@ -193,6 +194,9 @@ export function startAnalysisWorker(): Worker<AnalysisJobData> {
         return { success: true, productId };
       } catch (error) {
         console.error(`Error processing product ${productId}:`, error);
+        Sentry.captureException(error, {
+          tags: { service: "queue", jobId, productId },
+        });
 
         await prisma.product.update({
           where: { id: productId },

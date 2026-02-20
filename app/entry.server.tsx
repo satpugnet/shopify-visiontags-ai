@@ -6,7 +6,15 @@ import {
   type EntryContext,
 } from "@remix-run/node";
 import { isbot } from "isbot";
+import * as Sentry from "@sentry/remix";
 import { addDocumentResponseHeaders } from "./shopify.server";
+
+Sentry.init({
+  dsn: process.env.SENTRY_DSN,
+  tracesSampleRate: 0.1,
+  environment: process.env.NODE_ENV || "development",
+  enabled: !!process.env.SENTRY_DSN,
+});
 
 export const streamTimeout = 5000;
 

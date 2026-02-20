@@ -35,11 +35,19 @@ Shopify app that uses Claude Vision to auto-fill metafields, tags, descriptions,
 - Console: https://console.anthropic.com
 - API Key: (in .env, do not commit)
 
+### Sentry (Error Tracking)
+- Dashboard: https://shopify-visiontags-ai.sentry.io
+- Project: visiontags
+- DSN: (in .env)
+- Auth Token: (in .env, for API access)
+- Check unresolved issues: `curl -s -H "Authorization: Bearer $SENTRY_AUTH_TOKEN" "https://sentry.io/api/0/projects/shopify-visiontags-ai/visiontags/issues/?query=is:unresolved"`
+
 ## Environment Variables Checklist
 
 - [ ] DATABASE_URL - PostgreSQL connection string
 - [ ] REDIS_URL - Redis connection string for BullMQ
 - [ ] OPENROUTER_API_KEY - OpenRouter API key (routes to Claude Haiku via Anthropic Skin)
+- [ ] SENTRY_DSN - Sentry error tracking DSN (optional, disables if not set)
 - [ ] SHOPIFY_API_KEY - From Partner Dashboard
 - [ ] SHOPIFY_API_SECRET - From Partner Dashboard
 - [ ] SHOPIFY_APP_URL - Your app's public URL
