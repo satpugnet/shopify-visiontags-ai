@@ -59,6 +59,7 @@ export async function getOrCreateShopSettings(shop: string) {
         creditLimit: PLANS.FREE.credits,
       },
     });
+    console.log(`[VisionTags] New shop created: ${shop} (plan: FREE, credits: ${PLANS.FREE.credits})`);
   }
 
   return settings;
@@ -133,10 +134,9 @@ export async function useCredits(
   if (updated === 0) {
     // Either shop doesn't exist or would exceed limit
     const settings = await getOrCreateShopSettings(shop);
-    return {
-      success: false,
-      remaining: Math.max(0, settings.creditLimit - settings.creditsUsed),
-    };
+    const remaining = Math.max(0, settings.creditLimit - settings.creditsUsed);
+    console.log(`[VisionTags] Credit limit reached for ${shop}: requested ${count}, available ${remaining}`);
+    return { success: false, remaining };
   }
 
   // Track in UsageRecord for historical data
@@ -149,10 +149,9 @@ export async function useCredits(
 
   // Fetch updated settings for remaining count
   const settings = await getOrCreateShopSettings(shop);
-  return {
-    success: true,
-    remaining: Math.max(0, settings.creditLimit - settings.creditsUsed),
-  };
+  const remaining = Math.max(0, settings.creditLimit - settings.creditsUsed);
+  console.log(`[VisionTags] Credits used for ${shop}: ${count} (remaining: ${remaining})`);
+  return { success: true, remaining };
 }
 
 /**
@@ -172,12 +171,14 @@ export async function resetCredits(shop: string): Promise<void> {
       billingPeriodStart: new Date(),
     },
   });
+  console.log(`[VisionTags] Credits reset for ${shop} (plan: ${plan}, new limit: ${currentPlanCredits})`);
 }
 
 /**
  * Upgrade shop to Pro plan
  */
 export async function upgradeToProPlan(shop: string): Promise<void> {
+  console.log(`[VisionTags] Upgrading ${shop} to PRO (creditLimit: ${PLANS.PRO.credits}, creditsUsed: 0)`);
   await prisma.shopSettings.update({
     where: { shop },
     data: {
@@ -193,6 +194,7 @@ export async function upgradeToProPlan(shop: string): Promise<void> {
  * Downgrade shop to Free plan
  */
 export async function downgradeToFreePlan(shop: string): Promise<void> {
+  console.log(`[VisionTags] Downgrading ${shop} to FREE (creditLimit: ${PLANS.FREE.credits}, autoSync: off)`);
   await prisma.shopSettings.update({
     where: { shop },
     data: {
@@ -224,6 +226,7 @@ export async function toggleAutoSync(
     data: { autoSyncNewProducts: enabled },
   });
 
+  console.log(`[VisionTags] Auto-sync toggled for ${shop}: ${enabled}`);
   return { success: true };
 }
 
@@ -257,14 +260,18 @@ export async function syncPlanFromShopify(
       (sub: { status: string }) => sub.status === "ACTIVE"
     );
 
+    console.log(`[VisionTags] syncPlanFromShopify for ${shop}: ${JSON.stringify(subscriptions)} (hasActive: ${hasActive})`);
+
     const settings = await getOrCreateShopSettings(shop);
     const currentPlan = settings.plan as PlanType;
 
     if (hasActive && currentPlan !== "PRO") {
       await upgradeToProPlan(shop);
+      console.log(`[VisionTags] Synced ${shop}: ${currentPlan} → PRO`);
       return { plan: "PRO", synced: true };
     } else if (!hasActive && currentPlan !== "FREE") {
       await downgradeToFreePlan(shop);
+      console.log(`[VisionTags] Synced ${shop}: ${currentPlan} → FREE`);
       return { plan: "FREE", synced: true };
     }
 

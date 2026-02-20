@@ -142,6 +142,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       : await fetchAllProducts(admin, scanLimit);
 
     if (products.length === 0) {
+      console.log(`[VisionTags] Scan aborted for ${shop}: no products with images`);
       return json({
         error: "No products with images found",
         success: false,
@@ -152,6 +153,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const creditCheck = await hasAvailableCredits(shop, products.length);
     if (!creditCheck.allowed) {
       const billing = await getShopBilling(shop);
+      console.log(`[VisionTags] Scan aborted for ${shop}: insufficient credits (needed: ${products.length}, remaining: ${billing.creditsRemaining}, plan: ${billing.plan})`);
       const errorMessage = billing.plan === "PRO"
         ? "Not enough credits. Credits will reset at the start of your next billing cycle."
         : "Not enough credits. Upgrade to Pro for 5,000 credits/month.";
@@ -202,6 +204,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     // Use credits
     await useCredits(shop, products.length);
+
+    const collection = selectedCollection && selectedCollection !== "all" ? selectedCollection : "all";
+    console.log(`[VisionTags] Scan started for ${shop}: ${products.length} products (plan: ${billing.plan}, collection: ${collection}, jobId: ${job.id})`);
 
     return json({ success: true, jobId: job.id });
   }
