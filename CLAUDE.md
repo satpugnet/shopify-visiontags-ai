@@ -132,7 +132,7 @@ railway up
 
 ## Recent Changes
 
-- **Feb 19, 2026**: Shipped product descriptions + SEO generation (descriptions, SEO titles, meta descriptions generated from product images). Updated App Store listing with new features and search terms.
+- **Feb 19, 2026**: Shipped product descriptions + SEO generation (descriptions, SEO titles, meta descriptions generated from product images). Updated App Store listing with new features and search terms. Published Medium article on AI shopping readiness.
 
 ## Customers
 
@@ -143,6 +143,7 @@ railway up
 ## Marketing Assets
 
 - **Product Demo Video**: https://youtu.be/AUxcuY3qSDo
+- **Medium Article**: "How to Make Your Shopify Products Discoverable by ChatGPT Shopping and Perplexity" - https://medium.com/p/55a2354327bc (published Feb 19, 2026)
 
 ## Notes
 
