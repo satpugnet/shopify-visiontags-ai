@@ -140,6 +140,7 @@ railway up
 
 ## Recent Changes
 
+- **Feb 20, 2026**: Migrated from Anthropic API to OpenRouter (Anthropic Skin) for better rate limits. Added Sentry error tracking (vision service + queue worker). Added dry run mode for stress testing. Raised scan limit from 100 to plan-based (50 Free / 500 Pro).
 - **Feb 19, 2026**: Shipped product descriptions + SEO generation (descriptions, SEO titles, meta descriptions generated from product images). Updated App Store listing with new features and search terms. Published Medium article on AI shopping readiness.
 
 ## Customers
