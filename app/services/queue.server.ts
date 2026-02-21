@@ -144,6 +144,7 @@ export function startAnalysisWorker(): Worker<AnalysisJobData> {
 
         // Update the product in database
         if (isVisionError(result)) {
+          console.log(`[VisionTags] Product ${productId} analysis failed: ${result.error}`);
           await prisma.product.update({
             where: { id: productId },
             data: {
@@ -181,14 +182,16 @@ export function startAnalysisWorker(): Worker<AnalysisJobData> {
             (p) => p.status !== "PENDING"
           ).length;
 
+          const newStatus = processed >= jobRecord.totalItems ? "COMPLETED" : "PROCESSING";
           await prisma.job.update({
             where: { id: jobId },
             data: {
               processed,
-              status:
-                processed >= jobRecord.totalItems ? "COMPLETED" : "PROCESSING",
+              status: newStatus,
             },
           });
+
+          console.log(`[VisionTags] Job ${jobId} progress: ${processed}/${jobRecord.totalItems}${newStatus === "COMPLETED" ? " (COMPLETED)" : ""}`);
         }
 
         return { success: true, productId };

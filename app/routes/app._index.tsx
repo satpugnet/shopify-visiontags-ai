@@ -141,6 +141,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       ? await fetchCollectionProducts(admin, selectedCollection, scanLimit)
       : await fetchAllProducts(admin, scanLimit);
 
+    const collection = selectedCollection && selectedCollection !== "all" ? selectedCollection : "all";
+    console.log(`[VisionTags] Fetched ${products.length} products for ${shop} (limit: ${scanLimit}, collection: ${collection})`);
+
     if (products.length === 0) {
       console.log(`[VisionTags] Scan aborted for ${shop}: no products with images`);
       return json({
@@ -205,7 +208,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     // Use credits
     await useCredits(shop, products.length);
 
-    const collection = selectedCollection && selectedCollection !== "all" ? selectedCollection : "all";
     console.log(`[VisionTags] Scan started for ${shop}: ${products.length} products (plan: ${billing.plan}, collection: ${collection}, jobId: ${job.id})`);
 
     return json({ success: true, jobId: job.id });
