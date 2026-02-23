@@ -9,26 +9,13 @@
 
 import type { ActionFunctionArgs } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
+import { logger } from "../services/logger.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { shop, topic, payload } = await authenticate.webhook(request);
+  const { shop, topic } = await authenticate.webhook(request);
 
-  console.log(`Received ${topic} webhook for ${shop}`);
-  console.log("Customer data request payload:", JSON.stringify(payload));
-
-  // VisionTags does not store any customer personal data.
-  // We only store:
-  // - Shop domain and access tokens (not customer data)
-  // - Product information (titles, images, AI-generated tags)
-  // - Usage/billing records tied to the shop, not customers
-  //
-  // Therefore, we acknowledge the request but have no customer data to return.
-  // In a real scenario where you store customer data, you would:
-  // 1. Query your database for the customer's data
-  // 2. Format it appropriately
-  // 3. Send it to the shop owner via the provided email
-
-  console.log(`No customer data stored for shop ${shop} - request acknowledged`);
+  logger.info("WEBHOOK_RECEIVED", { shop, topic });
+  logger.info("GDPR_DATA_REQUEST", { shop, result: "no_customer_data_stored" });
 
   return new Response(null, { status: 200 });
 };

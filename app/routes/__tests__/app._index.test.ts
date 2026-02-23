@@ -5,6 +5,8 @@ const mocks = vi.hoisted(() => ({
   prisma: {
     job: {
       create: vi.fn(),
+      findMany: vi.fn(),
+      update: vi.fn(),
     },
     product: {
       deleteMany: vi.fn(),
@@ -18,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   fetchAllProducts: vi.fn(),
   fetchCollectionProducts: vi.fn(),
   queueBulkAnalysis: vi.fn(),
+  cleanupStaleJobs: vi.fn(),
   hasAvailableCredits: vi.fn(),
   useCredits: vi.fn(),
   getShopBilling: vi.fn(),
@@ -47,6 +50,7 @@ vi.mock("../../services/products.server", () => ({
 
 vi.mock("../../services/queue.server", () => ({
   queueBulkAnalysis: mocks.queueBulkAnalysis,
+  cleanupStaleJobs: mocks.cleanupStaleJobs,
 }));
 
 vi.mock("../../services/billing.server", () => ({
@@ -124,6 +128,8 @@ beforeEach(() => {
     billingPeriodStart: new Date(),
     autoSyncEnabled: false,
   });
+  // Default: no active jobs (concurrent scan check)
+  mocks.prisma.job.findMany.mockResolvedValue([]);
 });
 
 describe("app._index action", () => {
@@ -248,14 +254,21 @@ describe("app._index action", () => {
     mocks.hasAvailableCredits.mockResolvedValue({ allowed: true });
     mocks.prisma.job.create.mockResolvedValue(mockJob);
     mocks.prisma.$transaction.mockResolvedValue([{}, {}]);
+    mocks.prisma.job.update.mockResolvedValue({} as any);
     mocks.queueBulkAnalysis.mockRejectedValue(new Error("Redis unavailable"));
 
-    await expect(
-      action({ request: createScanRequest() } as any),
-    ).rejects.toThrow("Redis unavailable");
+    const response = await action({ request: createScanRequest() } as any);
+    const data = await response.json();
 
+    expect(data.success).toBe(false);
+    expect(data.error).toContain("Failed to start scan");
     // Credits should not be deducted if queue fails
     expect(mocks.useCredits).not.toHaveBeenCalled();
+    // Job should be marked as FAILED
+    expect(mocks.prisma.job.update).toHaveBeenCalledWith({
+      where: { id: "job-abc-123" },
+      data: { status: "FAILED" },
+    });
   });
 
   it("returns { success: false } for unknown action", async () => {

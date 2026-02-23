@@ -4,6 +4,7 @@
  */
 
 import type { AdminApiContext } from "@shopify/shopify-app-remix/server";
+import { logger } from "./logger.server";
 
 // Custom metafield mappings for VisionTags
 // Note: "shopify" namespace is reserved - we use "custom" for all app metafields
@@ -121,11 +122,11 @@ export async function updateProductMetafields(
     const inputs = toMetafieldInputs(filtered);
 
     if (inputs.length === 0) {
-      console.log(`[Metafields] No metafields to update for ${productId}`);
+      logger.info("METAFIELD_SYNC_SKIP", { productId, reason: "no_metafields" });
       return { success: true }; // Nothing to update
     }
 
-    console.log(`[Metafields] Setting ${inputs.length} metafields for ${productId}:`, inputs);
+    logger.info("METAFIELD_SYNC_START", { productId, count: inputs.length });
 
     // Use metafieldsSet mutation for reliable metafield updates
     // This mutation is specifically designed for setting metafields
@@ -163,23 +164,23 @@ export async function updateProductMetafields(
 
     const data = await response.json();
 
-    console.log(`[Metafields] API response for ${productId}:`, JSON.stringify(data, null, 2));
+    logger.info("METAFIELD_API_RESPONSE", { productId });
 
     const userErrors = data.data?.metafieldsSet?.userErrors;
     if (userErrors && userErrors.length > 0) {
       const errors = userErrors
         .map((e: { message: string; code?: string | null }) => `${e.message}${e.code ? ` (${e.code})` : ''}`)
         .join(", ");
-      console.error(`[Metafields] Error for ${productId}:`, errors);
+      logger.error("METAFIELD_SYNC_ERROR", { productId, errors });
       return { success: false, error: errors };
     }
 
     const setMetafields = data.data?.metafieldsSet?.metafields || [];
-    console.log(`[Metafields] Successfully set ${setMetafields.length} metafields for ${productId}`);
+    logger.info("METAFIELD_SYNC_SUCCESS", { productId, count: setMetafields.length });
 
     return { success: true };
   } catch (error) {
-    console.error("[Metafields] Error updating metafields:", error);
+    logger.error("METAFIELD_SYNC_ERROR", { productId, error: error instanceof Error ? error.message : String(error) });
     return {
       success: false,
       error: error instanceof Error ? error.message : "Unknown error",
@@ -227,7 +228,7 @@ export async function getProductMetafields(
 
     return metafields;
   } catch (error) {
-    console.error("Error fetching metafields:", error);
+    logger.error("METAFIELD_FETCH_ERROR", { productId, error: error instanceof Error ? error.message : String(error) });
     return {};
   }
 }

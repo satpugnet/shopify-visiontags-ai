@@ -7,6 +7,7 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import prisma from "../db.server";
 import Redis from "ioredis";
+import { logger } from "../services/logger.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const checks: Record<string, string> = {};
@@ -17,7 +18,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     await prisma.$queryRaw`SELECT 1`;
     checks.database = "ok";
   } catch (error) {
-    console.error("[VisionTags] Health check - database failed:", error);
+    logger.error("HEALTH_CHECK_FAILED", {
+      component: "database",
+      error: error instanceof Error ? error.message : String(error),
+    });
     checks.database = "error";
     isHealthy = false;
   }
@@ -34,7 +38,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       checks.redis = "not_configured";
     }
   } catch (error) {
-    console.error("[VisionTags] Health check - redis failed:", error);
+    logger.error("HEALTH_CHECK_FAILED", {
+      component: "redis",
+      error: error instanceof Error ? error.message : String(error),
+    });
     checks.redis = "error";
     // Redis down = queue dead, but app still serves pages
     // Mark as degraded, not unhealthy

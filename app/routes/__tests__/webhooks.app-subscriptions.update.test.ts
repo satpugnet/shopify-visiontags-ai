@@ -85,6 +85,23 @@ describe("webhooks.app-subscriptions.update", () => {
     expect(mocks.downgradeToFreePlan).not.toHaveBeenCalled();
   });
 
+  it("should downgrade to FREE when only Free subscription is active", async () => {
+    mocks.authenticate.webhook.mockResolvedValue({
+      shop: "test-shop.myshopify.com",
+      topic: "APP_SUBSCRIPTIONS_UPDATE",
+      payload: makeSubscriptionPayload("ACTIVE", "Free"),
+    });
+    mockShopifySubscriptions([
+      { id: "gid://shopify/AppSubscription/1", name: "Free", status: "ACTIVE" },
+    ]);
+
+    const response = await action({ request: createMockRequest() } as any);
+
+    expect(response.status).toBe(200);
+    expect(mocks.downgradeToFreePlan).toHaveBeenCalledWith("test-shop.myshopify.com");
+    expect(mocks.upgradeToProPlan).not.toHaveBeenCalled();
+  });
+
   it("should downgrade to FREE when Shopify confirms no active subscriptions", async () => {
     mocks.authenticate.webhook.mockResolvedValue({
       shop: "test-shop.myshopify.com",

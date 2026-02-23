@@ -35,6 +35,12 @@ Shopify app that uses Claude Vision to auto-fill metafields, tags, descriptions,
 - Console: https://console.anthropic.com
 - API Key: (in .env, do not commit)
 
+### Production Database (Direct Access)
+- Connection: `DATABASE_URL` in `.env`
+- Check installs: `psql "$DATABASE_URL" -c 'SELECT shop, plan, "creditsUsed", "creditLimit", "createdAt"::date FROM "ShopSettings" ORDER BY "createdAt";'`
+- Check usage: `psql "$DATABASE_URL" -c 'SELECT shop, month, count FROM "UsageRecord" ORDER BY month, shop;'`
+- Check jobs: `psql "$DATABASE_URL" -c 'SELECT shop, status, "totalItems", processed, "createdAt"::date FROM "Job" ORDER BY "createdAt" DESC LIMIT 20;'`
+
 ### Sentry (Error Tracking)
 - Dashboard: https://shopify-visiontags-ai.sentry.io
 - Project: visiontags
@@ -143,11 +149,21 @@ railway up
 - **Feb 20, 2026**: Migrated from Anthropic API to OpenRouter (Anthropic Skin) for better rate limits. Added Sentry error tracking (vision service + queue worker). Added dry run mode for stress testing. Raised scan limit from 100 to plan-based (50 Free / 500 Pro).
 - **Feb 19, 2026**: Shipped product descriptions + SEO generation (descriptions, SEO titles, meta descriptions generated from product images). Updated App Store listing with new features and search terms. Published Medium article on AI shopping readiness.
 
-## Customers
+## Customers & Contacts
 
 | Store | Email | Plan | Joined | Notes |
 |-------|-------|------|--------|-------|
 | Phoenix Publishing | phoenix.publishing.com@gmail.com | Pro ($19/mo) | Feb 2026 | First paying customer. Applied $5 discount for 1 month. Sent thank-you email from marco.a.duval@gmail.com (Feb 19, 2026) requesting feedback and App Store review. |
+| AURASPINE | Unknown | Unknown | ~Feb 20, 2026 | New customer, appeared organically (not from known outreach). Origin unverified. |
+| pro-grab-bar.myshopify.com | Unknown | Unknown | ~Feb 20, 2026 | Seen in production webhook logs (products/update). App installed. |
+
+### Community Contacts (from `COMMUNITY_OUTREACH.md`)
+
+| Person | Thread | Context |
+|--------|--------|---------|
+| @Michael42 | [Auto fill metafields](https://community.shopify.com/t/automatically-fill-out-product-metafields/302953) | Struggling with Shopify Flow for metafields. Reply drafted. |
+| @Yasin4 | [Product keywords](https://community.shopify.com/t/how-do-you-come-up-with-keywords-for-your-products/550290) | Suggested image analysis approach. Reply drafted building on their idea. |
+| (OP) | [Populate metafields on creation](https://community.shopify.com/t/on-product-creation-populate-metafields-with-pre-defined-data/334809) | Looking for metaobject alternatives. Reply drafted. |
 
 ## Distribution Strategy
 

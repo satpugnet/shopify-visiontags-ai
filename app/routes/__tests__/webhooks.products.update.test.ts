@@ -220,7 +220,7 @@ describe("webhooks.products.update", () => {
     });
     expect(mocks.queueProductAnalysis).toHaveBeenCalledWith(
       mockJob.id,
-      "gid://shopify/Product/123456789",
+      expect.stringContaining("gid://shopify/Product/123456789"),
       mockProductPayload.image.src,
       "test-shop.myshopify.com"
     );

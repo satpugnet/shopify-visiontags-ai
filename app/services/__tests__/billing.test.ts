@@ -431,6 +431,7 @@ describe("resetCredits (integration)", () => {
 
 describe("upgradeToProPlan (integration)", () => {
   it("should update plan and reset credits", async () => {
+    prismaMock.shopSettings.findUnique.mockResolvedValue(freeShopSettings as any);
     prismaMock.shopSettings.update.mockResolvedValue({} as any);
 
     await upgradeToProPlan("test-shop.myshopify.com");
@@ -445,10 +446,19 @@ describe("upgradeToProPlan (integration)", () => {
       },
     });
   });
+
+  it("should no-op when already on PRO", async () => {
+    prismaMock.shopSettings.findUnique.mockResolvedValue(proShopSettings as any);
+
+    await upgradeToProPlan("pro-shop.myshopify.com");
+
+    expect(prismaMock.shopSettings.update).not.toHaveBeenCalled();
+  });
 });
 
 describe("downgradeToFreePlan (integration)", () => {
   it("should update plan and disable auto-sync", async () => {
+    prismaMock.shopSettings.findUnique.mockResolvedValue(proShopSettings as any);
     prismaMock.shopSettings.update.mockResolvedValue({} as any);
 
     await downgradeToFreePlan("pro-shop.myshopify.com");
@@ -461,6 +471,14 @@ describe("downgradeToFreePlan (integration)", () => {
         autoSyncNewProducts: false,
       },
     });
+  });
+
+  it("should no-op when already on FREE", async () => {
+    prismaMock.shopSettings.findUnique.mockResolvedValue(freeShopSettings as any);
+
+    await downgradeToFreePlan("test-shop.myshopify.com");
+
+    expect(prismaMock.shopSettings.update).not.toHaveBeenCalled();
   });
 });
 
@@ -529,6 +547,19 @@ describe("syncPlanFromShopify (integration)", () => {
         billingPeriodStart: expect.any(Date),
       },
     });
+  });
+
+  it("should NOT upgrade when only Free subscription is active", async () => {
+    const mockAdmin = createMockAdmin([
+      { id: "gid://shopify/AppSubscription/1", name: "Free", status: "ACTIVE" },
+    ]);
+    prismaMock.shopSettings.findUnique.mockResolvedValue(freeShopSettings as any);
+
+    const result = await syncPlanFromShopify(mockAdmin, "test-shop.myshopify.com");
+
+    expect(result.plan).toBe("FREE");
+    expect(result.synced).toBe(false);
+    expect(prismaMock.shopSettings.update).not.toHaveBeenCalled();
   });
 
   it("should downgrade to FREE when no active subscriptions", async () => {

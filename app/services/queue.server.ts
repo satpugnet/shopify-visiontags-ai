@@ -6,6 +6,7 @@
 import { Queue, Worker, Job as BullJob } from "bullmq";
 import * as Sentry from "@sentry/remix";
 import { analyzeProductImage, isVisionError } from "./vision.server";
+import { logger } from "./logger.server";
 import prisma from "../db.server";
 
 // Redis connection options for BullMQ
@@ -121,6 +122,40 @@ export async function queueBulkAnalysis(
 }
 
 /**
+ * Mark jobs stuck in PROCESSING/QUEUED as FAILED if no progress in 15 minutes.
+ * Called from the dashboard loader to clean up stale jobs.
+ */
+export async function cleanupStaleJobs(shop?: string): Promise<number> {
+  const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
+
+  const where: Record<string, unknown> = {
+    status: { in: ["QUEUED", "PROCESSING"] },
+    updatedAt: { lt: fifteenMinutesAgo },
+  };
+  if (shop) {
+    where.shop = shop;
+  }
+
+  const staleJobs = await prisma.job.findMany({ where });
+
+  for (const job of staleJobs) {
+    await prisma.job.update({
+      where: { id: job.id },
+      data: { status: "FAILED" },
+    });
+    logger.warn("STALE_JOB_CLEANED", {
+      shop: job.shop,
+      jobId: job.id,
+      lastUpdated: job.updatedAt.toISOString(),
+      processed: job.processed,
+      totalItems: job.totalItems,
+    });
+  }
+
+  return staleJobs.length;
+}
+
+/**
  * Create and start the worker that processes analysis jobs
  * Uses singleton pattern - safe to call multiple times
  */
@@ -134,41 +169,84 @@ export function startAnalysisWorker(): Worker<AnalysisJobData> {
   analysisWorker = new Worker<AnalysisJobData>(
     QUEUE_NAME,
     async (job) => {
-      const { jobId, productId, imageUrl } = job.data;
+      const { jobId, productId, imageUrl, shop } = job.data;
 
-      console.log(`Processing product ${productId} for job ${jobId}`);
+      logger.info("PRODUCT_ANALYSIS_STARTED", { shop, jobId, productId });
+
+      // Check if product still exists before doing expensive API call
+      const productRecord = await prisma.product.findUnique({
+        where: { id: productId },
+      });
+
+      if (!productRecord) {
+        logger.warn("PRODUCT_SKIPPED_MISSING", {
+          shop,
+          jobId,
+          productId,
+          reason: "product_record_not_found",
+        });
+        // Don't throw - this would trigger retries for a permanently missing record
+        return { success: false, productId, skipped: true };
+      }
 
       try {
         // Analyze the image
+        Sentry.addBreadcrumb({
+          category: "queue",
+          message: `Analyzing product ${productId}`,
+          data: { jobId, shop },
+          level: "info",
+        });
+
         const result = await analyzeProductImage(imageUrl);
 
-        // Update the product in database
-        if (isVisionError(result)) {
-          console.log(`[VisionTags] Product ${productId} analysis failed: ${result.error}`);
-          await prisma.product.update({
-            where: { id: productId },
-            data: {
-              status: "ERROR",
+        // Update the product in database (wrapped in try-catch for race conditions)
+        try {
+          if (isVisionError(result)) {
+            logger.warn("PRODUCT_ANALYSIS_ERROR", {
+              shop,
+              jobId,
+              productId,
               error: result.error,
-            },
-          });
-        } else {
-          // Include alt_text in metafields blob for storage
-          const metafieldsWithAlt = {
-            ...result.metafields,
-            ...(result.alt_text ? { alt_text: result.alt_text } : {}),
-          };
-          await prisma.product.update({
-            where: { id: productId },
-            data: {
-              status: "ANALYZED",
-              suggestedMetafields: metafieldsWithAlt,
-              suggestedTags: result.tags,
-              suggestedDescription: result.description,
-              suggestedSeoTitle: result.seo_title,
-              suggestedMetaDescription: result.meta_description,
-            },
-          });
+              code: result.code,
+            });
+            await prisma.product.update({
+              where: { id: productId },
+              data: {
+                status: "ERROR",
+                error: result.error,
+              },
+            });
+          } else {
+            // Include alt_text in metafields blob for storage
+            const metafieldsWithAlt = {
+              ...result.metafields,
+              ...(result.alt_text ? { alt_text: result.alt_text } : {}),
+            };
+            await prisma.product.update({
+              where: { id: productId },
+              data: {
+                status: "ANALYZED",
+                suggestedMetafields: metafieldsWithAlt,
+                suggestedTags: result.tags,
+                suggestedDescription: result.description,
+                suggestedSeoTitle: result.seo_title,
+                suggestedMetaDescription: result.meta_description,
+              },
+            });
+          }
+        } catch (updateError) {
+          // Product was deleted between our check and the update (P2025)
+          if (updateError instanceof Error && updateError.message.includes("P2025")) {
+            logger.warn("PRODUCT_SKIPPED_MISSING", {
+              shop,
+              jobId,
+              productId,
+              reason: "deleted_during_analysis",
+            });
+            return { success: false, productId, skipped: true };
+          }
+          throw updateError;
         }
 
         // Update job progress
@@ -191,23 +269,48 @@ export function startAnalysisWorker(): Worker<AnalysisJobData> {
             },
           });
 
-          console.log(`[VisionTags] Job ${jobId} progress: ${processed}/${jobRecord.totalItems}${newStatus === "COMPLETED" ? " (COMPLETED)" : ""}`);
+          if (newStatus === "COMPLETED") {
+            logger.info("SCAN_COMPLETED", {
+              shop,
+              jobId,
+              totalItems: jobRecord.totalItems,
+              processed,
+            });
+          } else {
+            logger.info("PRODUCT_ANALYZED", {
+              shop,
+              jobId,
+              productId,
+              progress: `${processed}/${jobRecord.totalItems}`,
+            });
+          }
         }
 
         return { success: true, productId };
       } catch (error) {
-        console.error(`Error processing product ${productId}:`, error);
+        logger.error("WORKER_JOB_FAILED", {
+          shop,
+          jobId,
+          productId,
+          error: error instanceof Error ? error.message : String(error),
+        });
         Sentry.captureException(error, {
-          tags: { service: "queue", jobId, productId },
+          tags: { service: "queue", jobId, productId, shop },
+          extra: { imageUrl },
         });
 
-        await prisma.product.update({
-          where: { id: productId },
-          data: {
-            status: "ERROR",
-            error: error instanceof Error ? error.message : "Unknown error",
-          },
-        });
+        // Try to mark the product as errored (may fail if product was deleted)
+        try {
+          await prisma.product.update({
+            where: { id: productId },
+            data: {
+              status: "ERROR",
+              error: error instanceof Error ? error.message : "Unknown error",
+            },
+          });
+        } catch (updateError) {
+          logger.warn("PRODUCT_SKIPPED_MISSING", { shop, jobId, productId });
+        }
 
         throw error; // Re-throw to trigger retry
       }
@@ -223,14 +326,17 @@ export function startAnalysisWorker(): Worker<AnalysisJobData> {
   );
 
   analysisWorker.on("completed", (job) => {
-    console.log(`Job ${job.id} completed`);
+    logger.info("WORKER_JOB_COMPLETED", { queueJobId: job.id });
   });
 
   analysisWorker.on("failed", (job, err) => {
-    console.error(`[VisionTags] Job ${job?.id} failed:`, err);
+    logger.error("WORKER_JOB_FAILED", {
+      queueJobId: job?.id,
+      error: err.message,
+    });
   });
 
-  console.log("[VisionTags] Analysis worker started");
+  logger.info("WORKER_STARTED", {});
   return analysisWorker;
 }
 
@@ -262,6 +368,8 @@ if (typeof process !== "undefined" && process.env.REDIS_URL) {
   try {
     startAnalysisWorker();
   } catch (error) {
-    console.error("[VisionTags] Failed to start analysis worker:", error);
+    logger.error("WORKER_START_FAILED", {
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
 }

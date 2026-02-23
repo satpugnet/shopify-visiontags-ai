@@ -5,6 +5,7 @@
 
 import type { AdminApiContext } from "@shopify/shopify-app-remix/server";
 import prisma from "../db.server";
+import { logger } from "./logger.server";
 
 // Plan configurations
 // Using Claude Haiku 4.5: ~$0.003/scan
@@ -59,7 +60,7 @@ export async function getOrCreateShopSettings(shop: string) {
         creditLimit: PLANS.FREE.credits,
       },
     });
-    console.log(`[VisionTags] New shop created: ${shop} (plan: FREE, credits: ${PLANS.FREE.credits})`);
+    logger.info("SHOP_CREATED", { shop, plan: "FREE", creditLimit: PLANS.FREE.credits });
   }
 
   return settings;
@@ -85,12 +86,15 @@ export async function getShopBilling(shop: string): Promise<ShopBilling> {
   // Auto-reset credits if billing period expired (30 days)
   if (isBillingPeriodExpired(settings.billingPeriodStart)) {
     try {
-      console.log(`[VisionTags] Auto-resetting credits for ${shop} (billing period expired)`);
+      logger.info("CREDIT_RESET", { shop, reason: "billing_period_expired" });
       await resetCredits(shop);
       // Re-fetch settings after reset
       settings = await getOrCreateShopSettings(shop);
     } catch (error) {
-      console.error(`[VisionTags] Failed to auto-reset credits for ${shop}:`, error);
+      logger.error("CREDIT_RESET_FAILED", {
+        shop,
+        error: error instanceof Error ? error.message : String(error),
+      });
       // Continue with stale data rather than crashing the dashboard
     }
   }
@@ -135,7 +139,7 @@ export async function useCredits(
     // Either shop doesn't exist or would exceed limit
     const settings = await getOrCreateShopSettings(shop);
     const remaining = Math.max(0, settings.creditLimit - settings.creditsUsed);
-    console.log(`[VisionTags] Credit limit reached for ${shop}: requested ${count}, available ${remaining}`);
+    logger.warn("CREDIT_LIMIT_REACHED", { shop, requested: count, available: remaining });
     return { success: false, remaining };
   }
 
@@ -150,7 +154,7 @@ export async function useCredits(
   // Fetch updated settings for remaining count
   const settings = await getOrCreateShopSettings(shop);
   const remaining = Math.max(0, settings.creditLimit - settings.creditsUsed);
-  console.log(`[VisionTags] Credits used for ${shop}: ${count} (remaining: ${remaining})`);
+  logger.info("CREDIT_USED", { shop, count, remaining });
   return { success: true, remaining };
 }
 
@@ -171,14 +175,39 @@ export async function resetCredits(shop: string): Promise<void> {
       billingPeriodStart: new Date(),
     },
   });
-  console.log(`[VisionTags] Credits reset for ${shop} (plan: ${plan}, new limit: ${currentPlanCredits})`);
+  logger.info("CREDIT_RESET", { shop, plan, newLimit: currentPlanCredits });
 }
 
 /**
- * Upgrade shop to Pro plan
+ * Upgrade shop to Pro plan.
+ * Guarded: no-ops if already on PRO to prevent resetting credits on duplicate webhook calls.
  */
 export async function upgradeToProPlan(shop: string): Promise<void> {
-  console.log(`[VisionTags] Upgrading ${shop} to PRO (creditLimit: ${PLANS.PRO.credits}, creditsUsed: 0)`);
+  const settings = await getOrCreateShopSettings(shop);
+
+  if (settings.plan === "PRO") {
+    logger.info("PLAN_SYNC_SKIPPED", {
+      shop,
+      plan: "PRO",
+      reason: "already_on_pro",
+      creditsUsed: settings.creditsUsed,
+    });
+    // Ensure creditLimit matches config (handles plan config changes)
+    if (settings.creditLimit !== PLANS.PRO.credits) {
+      await prisma.shopSettings.update({
+        where: { shop },
+        data: { creditLimit: PLANS.PRO.credits },
+      });
+    }
+    return;
+  }
+
+  logger.info("PLAN_CHANGED", {
+    shop,
+    from: settings.plan,
+    to: "PRO",
+    creditLimit: PLANS.PRO.credits,
+  });
   await prisma.shopSettings.update({
     where: { shop },
     data: {
@@ -191,10 +220,27 @@ export async function upgradeToProPlan(shop: string): Promise<void> {
 }
 
 /**
- * Downgrade shop to Free plan
+ * Downgrade shop to Free plan.
+ * Guarded: no-ops if already on FREE.
  */
 export async function downgradeToFreePlan(shop: string): Promise<void> {
-  console.log(`[VisionTags] Downgrading ${shop} to FREE (creditLimit: ${PLANS.FREE.credits}, autoSync: off)`);
+  const settings = await getOrCreateShopSettings(shop);
+
+  if (settings.plan === "FREE") {
+    logger.info("PLAN_SYNC_SKIPPED", {
+      shop,
+      plan: "FREE",
+      reason: "already_on_free",
+    });
+    return;
+  }
+
+  logger.info("PLAN_CHANGED", {
+    shop,
+    from: settings.plan,
+    to: "FREE",
+    creditLimit: PLANS.FREE.credits,
+  });
   await prisma.shopSettings.update({
     where: { shop },
     data: {
@@ -226,7 +272,7 @@ export async function toggleAutoSync(
     data: { autoSyncNewProducts: enabled },
   });
 
-  console.log(`[VisionTags] Auto-sync toggled for ${shop}: ${enabled}`);
+  logger.info("AUTO_SYNC_TOGGLED", { shop, enabled });
   return { success: true };
 }
 
@@ -257,27 +303,33 @@ export async function syncPlanFromShopify(
       data.data?.currentAppInstallation?.activeSubscriptions || [];
 
     const hasActive = subscriptions.some(
-      (sub: { status: string }) => sub.status === "ACTIVE"
+      (sub: { status: string; name: string }) =>
+        sub.status === "ACTIVE" && sub.name !== "Free"
     );
 
-    console.log(`[VisionTags] syncPlanFromShopify for ${shop}: ${JSON.stringify(subscriptions)} (hasActive: ${hasActive})`);
+    logger.info("PLAN_SYNC_CHECK", {
+      shop,
+      subscriptions: JSON.stringify(subscriptions),
+      hasActive,
+    });
 
     const settings = await getOrCreateShopSettings(shop);
     const currentPlan = settings.plan as PlanType;
 
     if (hasActive && currentPlan !== "PRO") {
       await upgradeToProPlan(shop);
-      console.log(`[VisionTags] Synced ${shop}: ${currentPlan} → PRO`);
       return { plan: "PRO", synced: true };
     } else if (!hasActive && currentPlan !== "FREE") {
       await downgradeToFreePlan(shop);
-      console.log(`[VisionTags] Synced ${shop}: ${currentPlan} → FREE`);
       return { plan: "FREE", synced: true };
     }
 
     return { plan: currentPlan, synced: false };
   } catch (error) {
-    console.error("Error syncing plan from Shopify:", error);
+    logger.error("PLAN_SYNC_ERROR", {
+      shop,
+      error: error instanceof Error ? error.message : String(error),
+    });
     const settings = await getOrCreateShopSettings(shop);
     return { plan: settings.plan as PlanType, synced: false };
   }

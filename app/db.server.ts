@@ -17,5 +17,6 @@ export default prisma;
 // Start the background worker when this module loads (server startup)
 // This import has side effects - it starts the BullMQ worker
 import("./services/queue.server").catch((err) => {
-  console.error("[VisionTags] Failed to load queue service:", err);
+  // Use console.error here since logger may not be loaded yet at module init
+  console.error(JSON.stringify({ timestamp: new Date().toISOString(), level: "error", event: "QUEUE_SERVICE_LOAD_FAILED", error: err instanceof Error ? err.message : String(err) }));
 });

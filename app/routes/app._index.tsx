@@ -28,6 +28,7 @@ import {
   getPlanPickerUrl,
   PLANS,
 } from "../services/billing.server";
+import { logger } from "../services/logger.server";
 
 interface CollectionsQueryResponse {
   data?: {
@@ -47,8 +48,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
   const shop = session.shop;
 
+  logger.info("DASHBOARD_VIEWED", { shop });
+
   // Sync plan status from Shopify (Managed Pricing)
   await syncPlanFromShopify(admin, shop);
+
+  // Clean up stale jobs (stuck > 15 min)
+  const { cleanupStaleJobs } = await import("../services/queue.server");
+  await cleanupStaleJobs(shop);
 
   // Get product count
   const productCount = await countProducts(admin);
@@ -82,7 +89,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       productsCount: c.productsCount?.count ?? 0,
     }));
   } catch (error) {
-    console.error("[VisionTags] Failed to fetch collections:", error);
+    logger.error("COLLECTIONS_FETCH_FAILED", {
+      shop,
+      error: error instanceof Error ? error.message : String(error),
+    });
     // Continue without collections - not critical
   }
 
@@ -131,6 +141,26 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       "../services/billing.server"
     );
 
+    // Check for active scans (prevent concurrent scan race condition)
+    const activeJobs = await prisma.job.findMany({
+      where: {
+        shop,
+        status: { in: ["QUEUED", "PROCESSING"] },
+      },
+    });
+
+    if (activeJobs.length > 0) {
+      logger.warn("SCAN_BLOCKED_CONCURRENT", {
+        shop,
+        activeJobIds: activeJobs.map((j) => j.id),
+        activeJobCount: activeJobs.length,
+      });
+      return json({
+        error: "A scan is already in progress. Please wait for it to complete before starting another.",
+        success: false,
+      });
+    }
+
     // Get selected collection (if any)
     const selectedCollection = formData.get("selectedCollection") as string;
 
@@ -142,10 +172,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       : await fetchAllProducts(admin, scanLimit);
 
     const collection = selectedCollection && selectedCollection !== "all" ? selectedCollection : "all";
-    console.log(`[VisionTags] Fetched ${products.length} products for ${shop} (limit: ${scanLimit}, collection: ${collection})`);
+    logger.info("SCAN_PRODUCTS_FETCHED", {
+      shop,
+      productCount: products.length,
+      scanLimit,
+      collection,
+    });
 
     if (products.length === 0) {
-      console.log(`[VisionTags] Scan aborted for ${shop}: no products with images`);
+      logger.info("SCAN_BLOCKED_NO_PRODUCTS", { shop });
       return json({
         error: "No products with images found",
         success: false,
@@ -155,9 +190,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     // Check credits
     const creditCheck = await hasAvailableCredits(shop, products.length);
     if (!creditCheck.allowed) {
-      const billing = await getShopBilling(shop);
-      console.log(`[VisionTags] Scan aborted for ${shop}: insufficient credits (needed: ${products.length}, remaining: ${billing.creditsRemaining}, plan: ${billing.plan})`);
-      const errorMessage = billing.plan === "PRO"
+      const currentBilling = await getShopBilling(shop);
+      logger.warn("SCAN_BLOCKED_NO_CREDITS", {
+        shop,
+        needed: products.length,
+        remaining: currentBilling.creditsRemaining,
+        plan: currentBilling.plan,
+      });
+      const errorMessage = currentBilling.plan === "PRO"
         ? "Not enough credits. Credits will reset at the start of your next billing cycle."
         : "Not enough credits. Upgrade to Pro for 5,000 credits/month.";
       return json({
@@ -176,13 +216,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     });
 
     // Create or update product records using a transaction
-    // First delete existing products, then create new ones (simpler than upsert)
+    // Only delete products from COMPLETED/FAILED jobs (never from active ones)
     const productIds = products.map((p) => p.id);
 
     await prisma.$transaction([
-      // Delete existing products that will be rescanned
       prisma.product.deleteMany({
-        where: { id: { in: productIds } },
+        where: {
+          id: { in: productIds },
+          job: {
+            status: { in: ["COMPLETED", "FAILED"] },
+          },
+        },
       }),
       // Create fresh product records
       prisma.product.createMany({
@@ -198,17 +242,40 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       }),
     ]);
 
-    // Queue for processing
-    await queueBulkAnalysis(
-      job.id,
-      products.map((p) => ({ id: p.id, imageUrl: p.imageUrl })),
-      shop
-    );
+    // Queue for processing (wrapped in try-catch to avoid deducting credits on failure)
+    try {
+      await queueBulkAnalysis(
+        job.id,
+        products.map((p) => ({ id: p.id, imageUrl: p.imageUrl })),
+        shop
+      );
+    } catch (queueError) {
+      logger.error("QUEUE_ERROR", {
+        shop,
+        jobId: job.id,
+        error: queueError instanceof Error ? queueError.message : String(queueError),
+      });
+      // Mark job as FAILED so it doesn't block future scans
+      await prisma.job.update({
+        where: { id: job.id },
+        data: { status: "FAILED" },
+      });
+      return json({
+        error: "Failed to start scan. Please try again.",
+        success: false,
+      });
+    }
 
-    // Use credits
+    // Queue succeeded, now deduct credits
     await useCredits(shop, products.length);
 
-    console.log(`[VisionTags] Scan started for ${shop}: ${products.length} products (plan: ${billing.plan}, collection: ${collection}, jobId: ${job.id})`);
+    logger.info("SCAN_STARTED", {
+      shop,
+      jobId: job.id,
+      productCount: products.length,
+      plan: billing.plan,
+      collection,
+    });
 
     return json({ success: true, jobId: job.id });
   }
@@ -230,6 +297,10 @@ export default function Dashboard() {
 
   const isScanning =
     fetcher.state === "submitting" && fetcher.formData?.get("action") === "start-scan";
+
+  const hasActiveJob = jobs.some(
+    (job) => job.status === "QUEUED" || job.status === "PROCESSING"
+  );
 
   useEffect(() => {
     if (fetcher.data?.success && fetcher.data?.jobId) {
@@ -283,8 +354,8 @@ export default function Dashboard() {
   return (
     <Page>
       <TitleBar title="VisionTags Dashboard">
-        <button variant="primary" onClick={startScan} disabled={isScanning}>
-          {isScanning ? "Starting..." : "Start AI Scan"}
+        <button variant="primary" onClick={startScan} disabled={isScanning || hasActiveJob}>
+          {isScanning ? "Starting..." : hasActiveJob ? "Scan in progress..." : "Start AI Scan"}
         </button>
       </TitleBar>
 
@@ -299,6 +370,17 @@ export default function Dashboard() {
             <p>
               You have {billing.creditsRemaining} credits remaining this month.
               Upgrade to Pro for 5,000 credits/month.
+            </p>
+          </Banner>
+        )}
+
+        {hasActiveJob && (
+          <Banner
+            title="Scan in progress"
+            tone="info"
+          >
+            <p>
+              A scan is currently running. You can view its progress below or wait for it to complete before starting a new one.
             </p>
           </Banner>
         )}
@@ -356,9 +438,9 @@ export default function Dashboard() {
                     variant="primary"
                     onClick={startScan}
                     loading={isScanning}
-                    disabled={billing.creditsRemaining === 0}
+                    disabled={billing.creditsRemaining === 0 || hasActiveJob}
                   >
-                    Start AI Scan
+                    {hasActiveJob ? "Scan in progress..." : "Start AI Scan"}
                   </Button>
                   {billing.plan === "FREE" && (
                     <Button onClick={() => window.open(planPickerUrl, "_top")}>Upgrade to Pro</Button>

@@ -12,12 +12,12 @@
 import type { ActionFunctionArgs } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import db from "../db.server";
+import { logger } from "../services/logger.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { shop, topic, payload } = await authenticate.webhook(request);
 
-  console.log(`Received compliance webhook: ${topic} for ${shop}`);
-  console.log("Payload:", JSON.stringify(payload));
+  logger.info("WEBHOOK_RECEIVED", { shop, topic, handler: "compliance" });
 
   switch (topic) {
     case "CUSTOMERS_DATA_REQUEST":
@@ -30,7 +30,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return handleShopRedact(shop);
 
     default:
-      console.log(`Unknown compliance topic: ${topic}`);
+      logger.warn("UNKNOWN_COMPLIANCE_TOPIC", { shop, topic });
       return new Response(null, { status: 200 });
   }
 };
@@ -40,12 +40,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
  * VisionTags does not store customer personal data, so we acknowledge and return empty.
  */
 function handleCustomersDataRequest(shop: string): Response {
-  // VisionTags does not store any customer personal data.
-  // We only store:
-  // - Shop domain and access tokens (not customer data)
-  // - Product information (titles, images, AI-generated tags)
-  // - Usage/billing records tied to the shop, not customers
-  console.log(`No customer data stored for shop ${shop} - data request acknowledged`);
+  logger.info("GDPR_DATA_REQUEST", { shop, result: "no_customer_data_stored" });
   return new Response(null, { status: 200 });
 }
 
@@ -54,9 +49,7 @@ function handleCustomersDataRequest(shop: string): Response {
  * VisionTags does not store customer personal data, so we acknowledge and return success.
  */
 function handleCustomersRedact(shop: string): Response {
-  // VisionTags does not store any customer personal data.
-  // No data to delete.
-  console.log(`No customer data to redact for shop ${shop} - request acknowledged`);
+  logger.info("GDPR_CUSTOMER_REDACT", { shop, result: "no_customer_data_stored" });
   return new Response(null, { status: 200 });
 }
 
@@ -74,49 +67,45 @@ async function handleShopRedact(shop: string): Promise<Response> {
     });
 
     if (activeSession) {
-      console.log(`[VisionTags] Shop ${shop} has reinstalled - skipping data redaction`);
+      logger.info("SHOP_REDACT_SKIPPED", { shop, reason: "shop_reinstalled" });
       return new Response(null, { status: 200 });
     }
 
     // Delete all shop data in the correct order (respecting foreign keys)
 
-    // 1. Delete all products (references jobs)
     const deletedProducts = await db.product.deleteMany({
-      where: {
-        job: {
-          shop: shop,
-        },
-      },
+      where: { job: { shop } },
     });
-    console.log(`Deleted ${deletedProducts.count} products for ${shop}`);
 
-    // 2. Delete all jobs
     const deletedJobs = await db.job.deleteMany({
       where: { shop },
     });
-    console.log(`Deleted ${deletedJobs.count} jobs for ${shop}`);
 
-    // 3. Delete usage records
     const deletedUsage = await db.usageRecord.deleteMany({
       where: { shop },
     });
-    console.log(`Deleted ${deletedUsage.count} usage records for ${shop}`);
 
-    // 4. Delete shop settings
     const deletedSettings = await db.shopSettings.deleteMany({
       where: { shop },
     });
-    console.log(`Deleted ${deletedSettings.count} shop settings for ${shop}`);
 
-    // 5. Delete sessions (should already be done by app/uninstalled, but ensure cleanup)
     const deletedSessions = await db.session.deleteMany({
       where: { shop },
     });
-    console.log(`Deleted ${deletedSessions.count} sessions for ${shop}`);
 
-    console.log(`Successfully redacted all data for shop ${shop}`);
+    logger.info("SHOP_REDACTED", {
+      shop,
+      products: deletedProducts.count,
+      jobs: deletedJobs.count,
+      usage: deletedUsage.count,
+      settings: deletedSettings.count,
+      sessions: deletedSessions.count,
+    });
   } catch (error) {
-    console.error(`Error redacting data for shop ${shop}:`, error);
+    logger.error("SHOP_REDACT_ERROR", {
+      shop,
+      error: error instanceof Error ? error.message : String(error),
+    });
     // Still return 200 to acknowledge receipt - Shopify will retry on failure
   }
 

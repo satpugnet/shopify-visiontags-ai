@@ -1,14 +1,16 @@
 import type { ActionFunctionArgs } from "@remix-run/node";
+import * as Sentry from "@sentry/remix";
 import { authenticate, unauthenticated } from "../shopify.server";
 import {
   upgradeToProPlan,
   downgradeToFreePlan,
 } from "../services/billing.server";
+import { logger } from "../services/logger.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { shop, topic, payload } = await authenticate.webhook(request);
 
-  console.log(`[VisionTags] Received ${topic} webhook for ${shop}`);
+  logger.info("WEBHOOK_RECEIVED", { shop, topic });
 
   const subscriptionPayload = payload as {
     app_subscription?: {
@@ -20,7 +22,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   const status = subscriptionPayload.app_subscription?.status;
   const name = subscriptionPayload.app_subscription?.name;
-  console.log(`[VisionTags] Subscription update: ${name} → ${status}`);
+  logger.info("SUBSCRIPTION_UPDATE", { shop, name, status });
 
   // Query Shopify for the ACTUAL current subscription state.
   // This prevents race conditions when multiple webhooks arrive simultaneously
@@ -44,23 +46,33 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const subscriptions =
       data.data?.currentAppInstallation?.activeSubscriptions || [];
     const hasActive = subscriptions.some(
-      (sub: { status: string }) => sub.status === "ACTIVE"
+      (sub: { status: string; name: string }) =>
+        sub.status === "ACTIVE" && sub.name !== "Free"
     );
 
-    console.log(`[VisionTags] Active subscriptions for ${shop}: ${subscriptions.length} (hasActive: ${hasActive})`);
+    logger.info("SUBSCRIPTION_VERIFIED", {
+      shop,
+      subscriptionCount: subscriptions.length,
+      hasActive,
+    });
 
     if (hasActive) {
       await upgradeToProPlan(shop);
-      console.log(`[VisionTags] ${shop} confirmed on Pro plan`);
     } else {
       await downgradeToFreePlan(shop);
-      console.log(`[VisionTags] ${shop} downgraded to Free plan`);
     }
   } catch (error) {
     // If we can't query Shopify (e.g., token expired), fall back to webhook payload
-    console.error(`[VisionTags] Failed to verify subscriptions for ${shop}, falling back to webhook payload:`, error);
+    logger.error("SUBSCRIPTION_VERIFY_FAILED", {
+      shop,
+      error: error instanceof Error ? error.message : String(error),
+      fallback: "webhook_payload",
+    });
+    Sentry.captureException(error, {
+      tags: { service: "webhook", topic, shop },
+    });
 
-    if (status === "ACTIVE") {
+    if (status === "ACTIVE" && name !== "Free") {
       await upgradeToProPlan(shop);
     } else if (status === "CANCELLED" || status === "EXPIRED" || status === "DECLINED") {
       await downgradeToFreePlan(shop);

@@ -5,6 +5,7 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import * as Sentry from "@sentry/remix";
+import { logger } from "./logger.server";
 
 // Initialize Anthropic client via OpenRouter's Anthropic Skin
 const anthropic = new Anthropic({
@@ -52,7 +53,7 @@ async function withRetry<T>(
         baseDelayMs * Math.pow(2, attempt) + Math.random() * 1000,
         maxDelayMs
       );
-      console.log(`[VisionTags] Retry ${attempt + 1}/${maxRetries} after ${Math.round(delay)}ms`);
+      logger.warn("VISION_API_RETRY", { attempt: attempt + 1, maxRetries, delayMs: Math.round(delay) });
       await new Promise((resolve) => setTimeout(resolve, delay));
     }
   }
@@ -267,7 +268,7 @@ export async function analyzeProductImage(
       };
     }
   } catch (error) {
-    console.error("Vision API error:", error);
+    logger.error("VISION_API_ERROR", { imageUrl, error: error instanceof Error ? error.message : String(error) });
     Sentry.captureException(error, {
       tags: { service: "vision" },
       extra: { imageUrl },

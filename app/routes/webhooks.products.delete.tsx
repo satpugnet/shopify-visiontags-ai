@@ -5,8 +5,10 @@
  */
 
 import type { ActionFunctionArgs } from "@remix-run/node";
+import * as Sentry from "@sentry/remix";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
+import { logger } from "../services/logger.server";
 
 interface ProductDeletePayload {
   id: number;
@@ -16,13 +18,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const { shop, topic, payload } = await authenticate.webhook(request);
 
   try {
-    console.log(`[VisionTags] Received ${topic} webhook for ${shop}`);
+    logger.info("WEBHOOK_RECEIVED", { shop, topic });
 
     const productData = payload as ProductDeletePayload;
     const productId = `gid://shopify/Product/${productData.id}`;
 
     // Delete all product records with this Shopify product ID
-    // Note: We use startsWith because re-analysis creates IDs like "gid://.../{id}-{timestamp}"
+    // Note: We use startsWith because re-analysis creates IDs like "gid://.../{id}-{uuid}"
     const deleted = await prisma.product.deleteMany({
       where: {
         OR: [
@@ -36,12 +38,19 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     });
 
     if (deleted.count > 0) {
-      console.log(`[VisionTags] Deleted ${deleted.count} product record(s) for ${productId} in ${shop}`);
+      logger.info("PRODUCT_RECORDS_DELETED", { shop, productId, count: deleted.count });
     }
 
     return new Response();
   } catch (error) {
-    console.error(`[VisionTags] Error handling ${topic} webhook for ${shop}:`, error);
+    logger.error("WEBHOOK_ERROR", {
+      shop,
+      topic,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    Sentry.captureException(error, {
+      tags: { service: "webhook", topic, shop },
+    });
     return new Response();
   }
 };

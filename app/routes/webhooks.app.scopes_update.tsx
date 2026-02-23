@@ -1,12 +1,13 @@
 import type { ActionFunctionArgs } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import db from "../db.server";
+import { logger } from "../services/logger.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { payload, session, topic, shop } = await authenticate.webhook(request);
 
   try {
-    console.log(`[VisionTags] Received ${topic} webhook for ${shop}`);
+    logger.info("WEBHOOK_RECEIVED", { shop, topic });
 
     const current = payload.current as string[];
     if (session) {
@@ -21,7 +22,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
     return new Response();
   } catch (error) {
-    console.error(`[VisionTags] Error handling ${topic} webhook for ${shop}:`, error);
+    logger.error("WEBHOOK_ERROR", {
+      shop,
+      topic,
+      error: error instanceof Error ? error.message : String(error),
+    });
     // Always return 200 to prevent Shopify retries
     return new Response();
   }

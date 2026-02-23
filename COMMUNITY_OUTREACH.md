@@ -10,7 +10,7 @@ Post these replies once the Shopify Community account is approved.
 ## 1. Auto fill metafields thread
 
 **URL:** https://community.shopify.com/t/automatically-fill-out-product-metafields/302953
-**Status:** [ ] Not posted
+**Status:** [x] Posted (Feb 21, 2026)
 
 **Reply:**
 

@@ -22,10 +22,12 @@ import {
   Divider,
   Banner,
   TextField,
+  List,
 } from "@shopify/polaris";
 import { TitleBar, useAppBridge } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
+import { logger } from "../services/logger.server";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   await authenticate.admin(request);
@@ -116,7 +118,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       });
 
       if (!product || product.status !== "ANALYZED") {
-        console.log(`Skipping product ${productId}: not found or not ANALYZED (status: ${product?.status})`);
+        logger.warn("SYNC_PRODUCT_SKIPPED", { productId, reason: !product ? "not_found" : "not_analyzed", status: product?.status });
         continue;
       }
 
@@ -146,7 +148,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       // Sync metafields (exclude alt_text from metafields sync)
       if (syncMetafields && suggestedMetafields) {
         const { alt_text: _, ...metafieldsWithoutAlt } = suggestedMetafields;
-        console.log(`Syncing metafields for ${product.title}:`, metafieldsWithoutAlt);
+        logger.info("SYNC_METAFIELDS_START", { productId, title: product.title });
         const result = await updateProductMetafields(
           admin,
           productId,
@@ -156,24 +158,24 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         metaSuccess = result.success;
         metaError = result.error;
         if (!metaSuccess) {
-          console.error(`Metafield sync failed for ${product.title}:`, metaError);
+          logger.error("SYNC_METAFIELDS_FAILED", { productId, title: product.title, error: metaError });
         }
       }
 
       // Sync tags
       if (syncTags && suggestedTags) {
-        console.log(`Syncing tags for ${product.title}:`, suggestedTags);
+        logger.info("SYNC_TAGS_START", { productId, title: product.title });
         const result = await updateProductTags(admin, productId, suggestedTags);
         tagSuccess = result.success;
         tagError = result.error;
         if (!tagSuccess) {
-          console.error(`Tag sync failed for ${product.title}:`, tagError);
+          logger.error("SYNC_TAGS_FAILED", { productId, title: product.title, error: tagError });
         }
       }
 
       // Sync alt text (use edited alt text if available)
       if (syncAltText && altText) {
-        console.log(`Syncing alt text for ${product.title}:`, altText);
+        logger.info("SYNC_ALT_TEXT_START", { productId, title: product.title });
         const result = await updateProductImageAlt(
           admin,
           productId,
@@ -182,7 +184,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         altTextSuccess = result.success;
         altTextError = result.error;
         if (!altTextSuccess) {
-          console.error(`Alt text sync failed for ${product.title}:`, altTextError);
+          logger.error("SYNC_ALT_TEXT_FAILED", { productId, title: product.title, error: altTextError });
         }
       }
 
@@ -193,7 +195,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         const metaDescription = productEdits?.meta_description ?? product.suggestedMetaDescription;
 
         if (description || seoTitle || metaDescription) {
-          console.log(`Syncing description & SEO for ${product.title}`);
+          logger.info("SYNC_DESCRIPTION_SEO_START", { productId, title: product.title });
           const result = await updateProductDescriptionAndSeo(
             admin,
             productId,
@@ -204,7 +206,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
           descSuccess = result.success;
           descError = result.error;
           if (!descSuccess) {
-            console.error(`Description/SEO sync failed for ${product.title}:`, descError);
+            logger.error("SYNC_DESCRIPTION_SEO_FAILED", { productId, title: product.title, error: descError });
           }
         }
       }
@@ -236,7 +238,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       ? `Synced ${synced} products, ${errors} failed: ${errorMessages[0]}`
       : `Synced ${synced} products${errors > 0 ? `, ${errors} failed` : ""}`;
 
-    console.log("Sync complete:", { synced, errors, errorMessages });
+    logger.info("SYNC_COMPLETE", { jobId: id, synced, errors, errorCount: errorMessages.length });
 
     return json({
       success: true,
@@ -592,32 +594,51 @@ export default function JobDetail() {
           </Banner>
         )}
 
-        {/* Sync Options */}
+        {/* Sync Guide */}
+        {analyzedProducts.length > 0 && (
+          <Banner
+            title="Your AI suggestions are ready to apply"
+            tone="info"
+          >
+            <List type="number">
+              <List.Item>Click "Show details" on any product to review or edit suggestions (details appear below the table)</List.Item>
+              <List.Item>Select the products you want to update using the checkboxes</List.Item>
+              <List.Item>Click "Sync" below to apply the changes to your Shopify store</List.Item>
+            </List>
+          </Banner>
+        )}
+
+        {/* Apply to Shopify */}
         {analyzedProducts.length > 0 && (
           <Card>
             <BlockStack gap="400">
-              <Text as="h2" variant="headingMd">
-                Sync Options
-              </Text>
+              <BlockStack gap="100">
+                <Text as="h2" variant="headingMd">
+                  Apply to Shopify
+                </Text>
+                <Text as="p" variant="bodySm" tone="subdued">
+                  Choose which data types to write to your selected products.
+                </Text>
+              </BlockStack>
 
               <InlineStack gap="400" wrap>
                 <Checkbox
-                  label="Sync Metafields (color, material, pattern, etc.)"
+                  label="Metafields (color, material, pattern, etc.)"
                   checked={syncMetafields}
                   onChange={setSyncMetafields}
                 />
                 <Checkbox
-                  label="Sync Tags (SEO + vibe keywords)"
+                  label="Tags (SEO + vibe keywords)"
                   checked={syncTags}
                   onChange={setSyncTags}
                 />
                 <Checkbox
-                  label="Sync Alt Text (image accessibility)"
+                  label="Alt Text (image accessibility)"
                   checked={syncAltText}
                   onChange={setSyncAltText}
                 />
                 <Checkbox
-                  label="Sync Description & SEO (product description, page title, meta description)"
+                  label="Description & SEO (product description, page title, meta description)"
                   checked={syncDescription}
                   onChange={setSyncDescription}
                 />
@@ -636,7 +657,9 @@ export default function JobDetail() {
                   {`Sync ${selectedResources.length} Selected Products`}
                 </Button>
                 <Text as="span" variant="bodySm" tone="subdued">
-                  {analyzedProducts.length} products ready to sync
+                  {selectedResources.length === 0
+                    ? "Select products from the table below to get started"
+                    : `${analyzedProducts.length} products ready to sync`}
                 </Text>
               </InlineStack>
             </BlockStack>

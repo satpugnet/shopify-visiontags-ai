@@ -4,6 +4,7 @@
  */
 
 import type { AdminApiContext } from "@shopify/shopify-app-remix/server";
+import { logger } from "./logger.server";
 
 /**
  * Retry a function with exponential backoff
@@ -44,7 +45,7 @@ async function withRetry<T>(
         baseDelayMs * Math.pow(2, attempt) + Math.random() * 1000,
         maxDelayMs
       );
-      console.log(`[VisionTags] Shopify API retry ${attempt + 1}/${maxRetries} after ${Math.round(delay)}ms`);
+      logger.warn("SHOPIFY_API_RETRY", { attempt: attempt + 1, maxRetries, delayMs: Math.round(delay) });
       await new Promise((resolve) => setTimeout(resolve, delay));
     }
   }
@@ -212,7 +213,7 @@ export async function fetchAllProducts(
 
     return products;
   } catch (error) {
-    console.error("[VisionTags] Error fetching products:", error);
+    logger.error("PRODUCTS_FETCH_ERROR", { error: error instanceof Error ? error.message : String(error) });
     throw error;
   }
 }
@@ -261,7 +262,7 @@ export async function getProduct(
       tags: product.tags,
     };
   } catch (error) {
-    console.error(`[VisionTags] Error fetching product ${productId}:`, error);
+    logger.error("PRODUCT_FETCH_ERROR", { productId, error: error instanceof Error ? error.message : String(error) });
     throw error;
   }
 }
@@ -275,7 +276,7 @@ export async function updateProductTags(
   tags: string[]
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    console.log(`[VisionTags] Setting ${tags.length} tags for ${productId}:`, tags);
+    logger.info("TAGS_SYNC_START", { productId, count: tags.length });
 
     const response = await admin.graphql(
       `#graphql
@@ -303,22 +304,22 @@ export async function updateProductTags(
 
     const data = (await response.json()) as ProductUpdateResponse;
 
-    console.log(`[VisionTags] Tags API response for ${productId}:`, JSON.stringify(data, null, 2));
+    logger.info("TAGS_API_RESPONSE", { productId });
 
     if (data.data?.productUpdate?.userErrors?.length) {
       const errors = data.data.productUpdate.userErrors
         .map((e) => e.message)
         .join(", ");
-      console.error(`[VisionTags] Tags error for ${productId}:`, errors);
+      logger.error("TAGS_SYNC_ERROR", { productId, errors });
       return { success: false, error: errors };
     }
 
     const updatedTags = data.data?.productUpdate?.product?.tags || [];
-    console.log(`[VisionTags] Successfully set ${updatedTags.length} tags for ${productId}`);
+    logger.info("TAGS_SYNC_SUCCESS", { productId, count: updatedTags.length });
 
     return { success: true };
   } catch (error) {
-    console.error("[VisionTags] Error updating tags:", error);
+    logger.error("TAGS_SYNC_ERROR", { productId, error: error instanceof Error ? error.message : String(error) });
     return {
       success: false,
       error: error instanceof Error ? error.message : "Unknown error",
@@ -343,7 +344,7 @@ export async function countProducts(admin: AdminApiContext): Promise<number> {
     const data = (await response.json()) as ProductsCountResponse;
     return data.data?.productsCount?.count || 0;
   } catch (error) {
-    console.error("[VisionTags] Error counting products:", error);
+    logger.error("PRODUCTS_COUNT_ERROR", { error: error instanceof Error ? error.message : String(error) });
     throw error;
   }
 }
@@ -425,7 +426,7 @@ export async function fetchCollectionProducts(
 
     return products;
   } catch (error) {
-    console.error(`[VisionTags] Error fetching collection products for ${collectionId}:`, error);
+    logger.error("COLLECTION_PRODUCTS_FETCH_ERROR", { collectionId, error: error instanceof Error ? error.message : String(error) });
     throw error;
   }
 }
@@ -481,7 +482,7 @@ export async function updateProductDescriptionAndSeo(
       productInput.seo = seoInput;
     }
 
-    console.log(`[VisionTags] Updating description & SEO for ${productId}`);
+    logger.info("DESCRIPTION_SEO_SYNC_START", { productId });
 
     const response = await admin.graphql(
       `#graphql
@@ -514,14 +515,14 @@ export async function updateProductDescriptionAndSeo(
       const errors = data.data.productUpdate.userErrors
         .map((e) => e.message)
         .join(", ");
-      console.error(`[VisionTags] Description/SEO error for ${productId}:`, errors);
+      logger.error("DESCRIPTION_SEO_SYNC_ERROR", { productId, errors });
       return { success: false, error: errors };
     }
 
-    console.log(`[VisionTags] Description & SEO updated for ${productId}`);
+    logger.info("DESCRIPTION_SEO_SYNC_SUCCESS", { productId });
     return { success: true };
   } catch (error) {
-    console.error(`[VisionTags] Error updating description/SEO for ${productId}:`, error);
+    logger.error("DESCRIPTION_SEO_SYNC_ERROR", { productId, error: error instanceof Error ? error.message : String(error) });
     return {
       success: false,
       error: error instanceof Error ? error.message : "Unknown error",
@@ -594,7 +595,7 @@ export async function updateProductImageAlt(
     }
 
     const mediaId = mediaNodes[0].id;
-    console.log(`[VisionTags] Updating alt text for media ${mediaId} on product ${productId}`);
+    logger.info("ALT_TEXT_SYNC_START", { productId, mediaId });
 
     // Update the media alt text using productUpdateMedia mutation
     const response = await admin.graphql(
@@ -629,14 +630,14 @@ export async function updateProductImageAlt(
       const errors = data.data.productUpdateMedia.mediaUserErrors
         .map((e) => e.message)
         .join(", ");
-      console.error(`[VisionTags] Alt text error for ${productId}:`, errors);
+      logger.error("ALT_TEXT_SYNC_ERROR", { productId, errors });
       return { success: false, error: errors };
     }
 
-    console.log(`[VisionTags] Alt text updated for ${productId}`);
+    logger.info("ALT_TEXT_SYNC_SUCCESS", { productId });
     return { success: true };
   } catch (error) {
-    console.error(`[VisionTags] Error updating alt text for ${productId}:`, error);
+    logger.error("ALT_TEXT_SYNC_ERROR", { productId, error: error instanceof Error ? error.message : String(error) });
     return {
       success: false,
       error: error instanceof Error ? error.message : "Unknown error",

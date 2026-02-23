@@ -9,26 +9,22 @@
 
 import type { ActionFunctionArgs } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
+import { logger } from "../services/logger.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { shop, topic, payload } = await authenticate.webhook(request);
+  const { shop, topic } = await authenticate.webhook(request);
 
   try {
-    console.log(`[VisionTags] Received ${topic} webhook for ${shop}`);
-
-    // VisionTags does not store any customer personal data.
-    // We only store:
-    // - Shop domain and access tokens (not customer data)
-    // - Product information (titles, images, AI-generated tags)
-    // - Usage/billing records tied to the shop, not customers
-    //
-    // Therefore, we acknowledge the request but have no customer data to delete.
-
-    console.log(`[VisionTags] No customer data to redact for shop ${shop} - request acknowledged`);
+    logger.info("WEBHOOK_RECEIVED", { shop, topic });
+    logger.info("GDPR_CUSTOMER_REDACT", { shop, result: "no_customer_data_stored" });
 
     return new Response(null, { status: 200 });
   } catch (error) {
-    console.error(`[VisionTags] Error handling ${topic} webhook for ${shop}:`, error);
+    logger.error("WEBHOOK_ERROR", {
+      shop,
+      topic,
+      error: error instanceof Error ? error.message : String(error),
+    });
     // Always return 200 to prevent Shopify retries
     return new Response(null, { status: 200 });
   }

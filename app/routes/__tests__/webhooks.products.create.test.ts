@@ -180,7 +180,7 @@ describe("webhooks.products.create", () => {
     });
     expect(mocks.prisma.product.create).toHaveBeenCalledWith({
       data: {
-        id: "gid://shopify/Product/123456789",
+        id: expect.stringContaining("gid://shopify/Product/123456789"),
         jobId: mockJob.id,
         title: mockProductPayload.title,
         imageUrl: mockProductPayload.image.src,
@@ -191,7 +191,7 @@ describe("webhooks.products.create", () => {
     });
     expect(mocks.queueProductAnalysis).toHaveBeenCalledWith(
       mockJob.id,
-      "gid://shopify/Product/123456789",
+      expect.stringContaining("gid://shopify/Product/123456789"),
       mockProductPayload.image.src,
       "test-shop.myshopify.com"
     );

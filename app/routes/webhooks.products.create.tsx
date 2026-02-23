@@ -1,8 +1,10 @@
 import type { ActionFunctionArgs } from "@remix-run/node";
+import * as Sentry from "@sentry/remix";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { queueProductAnalysis } from "../services/queue.server";
 import { hasAvailableCredits, useCredits } from "../services/billing.server";
+import { logger } from "../services/logger.server";
 
 interface ProductCreatePayload {
   id: number;
@@ -18,7 +20,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const { shop, topic, payload } = await authenticate.webhook(request);
 
   try {
-    console.log(`[VisionTags] Received ${topic} webhook for ${shop}`);
+    logger.info("WEBHOOK_RECEIVED", { shop, topic });
 
     const productData = payload as ProductCreatePayload;
 
@@ -28,25 +30,27 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     });
 
     if (!settings?.autoSyncNewProducts) {
-      console.log(`[VisionTags] Auto-sync disabled for ${shop}, skipping`);
+      logger.info("AUTO_SYNC_SKIP", { shop, reason: "disabled" });
       return new Response();
     }
 
     // Check if product has an image
     if (!productData.image?.src) {
-      console.log(`[VisionTags] Product ${productData.id} has no image, skipping`);
+      logger.info("AUTO_SYNC_SKIP", { shop, productId: productData.id, reason: "no_image" });
       return new Response();
     }
 
     // Check credits
     const creditCheck = await hasAvailableCredits(shop, 1);
     if (!creditCheck.allowed) {
-      console.log(`[VisionTags] Shop ${shop} has no credits, skipping auto-sync`);
+      logger.warn("AUTO_SYNC_SKIP", { shop, reason: "no_credits" });
       return new Response();
     }
 
     // Create a job for this single product
-    const productId = `gid://shopify/Product/${productData.id}`;
+    const shopifyProductId = `gid://shopify/Product/${productData.id}`;
+    // Use UUID-suffixed ID to avoid conflicts with existing product records from manual scans
+    const dbProductId = `${shopifyProductId}-${crypto.randomUUID()}`;
 
     const job = await prisma.job.create({
       data: {
@@ -59,7 +63,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     // Create product record
     await prisma.product.create({
       data: {
-        id: productId,
+        id: dbProductId,
         jobId: job.id,
         title: productData.title,
         imageUrl: productData.image.src,
@@ -69,12 +73,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       },
     });
 
-    // Queue for processing - this throws if Redis is unavailable
+    // Queue for processing - pass the DB record ID (not the Shopify GID)
     try {
-      await queueProductAnalysis(job.id, productId, productData.image.src, shop);
+      await queueProductAnalysis(job.id, dbProductId, productData.image.src, shop);
     } catch (queueError) {
       // Queue failed - don't deduct credits, clean up the job record
-      console.error(`[VisionTags] Failed to queue product ${productId} - not deducting credits:`, queueError);
+      logger.error("QUEUE_ERROR", {
+        shop,
+        productId: dbProductId,
+        error: queueError instanceof Error ? queueError.message : String(queueError),
+      });
       await prisma.job.delete({ where: { id: job.id } }).catch(() => {});
       return new Response();
     }
@@ -84,14 +92,30 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     try {
       await useCredits(shop, 1);
     } catch (creditError) {
-      console.error(`[VisionTags] Failed to deduct credit for ${shop} (analysis will still run):`, creditError);
+      logger.error("CREDIT_DEDUCT_FAILED", {
+        shop,
+        error: creditError instanceof Error ? creditError.message : String(creditError),
+      });
     }
 
-    console.log(`[VisionTags] Queued auto-analysis for new product ${productId} in ${shop}`);
+    logger.info("AUTO_SYNC_QUEUED", {
+      shop,
+      productId: dbProductId,
+      shopifyProductId,
+      jobId: job.id,
+      trigger: "products/create",
+    });
 
     return new Response();
   } catch (error) {
-    console.error(`[VisionTags] Error handling ${topic} webhook for ${shop}:`, error);
+    logger.error("WEBHOOK_ERROR", {
+      shop,
+      topic,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    Sentry.captureException(error, {
+      tags: { service: "webhook", topic, shop },
+    });
     // Always return 200 to prevent Shopify retries
     return new Response();
   }
