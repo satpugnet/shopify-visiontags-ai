@@ -68,7 +68,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           nodes {
             id
             title
-            productsCount {
+            productsCount(limit: null) {
               count
             }
           }

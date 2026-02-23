@@ -334,7 +334,7 @@ export async function countProducts(admin: AdminApiContext): Promise<number> {
     const response = await admin.graphql(
       `#graphql
       query countProducts {
-        productsCount {
+        productsCount(limit: null) {
           count
         }
       }`
