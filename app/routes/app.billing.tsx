@@ -23,6 +23,7 @@ import {
   getPlanPickerUrl,
   PLANS,
 } from "../services/billing.server";
+import { logger } from "../services/logger.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
@@ -33,6 +34,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   const billing = await getShopBilling(shop);
   const planPickerUrl = getPlanPickerUrl(shop);
+
+  logger.info("BILLING_PAGE_VIEWED", {
+    shop,
+    plan: billing.plan,
+    creditsUsed: billing.creditsUsed,
+    creditsRemaining: billing.creditsRemaining,
+  });
 
   return json({
     shop,

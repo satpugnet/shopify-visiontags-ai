@@ -30,7 +30,8 @@ import prisma from "../db.server";
 import { logger } from "../services/logger.server";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
-  await authenticate.admin(request);
+  const { session } = await authenticate.admin(request);
+  const shop = session.shop;
   const { id } = params;
 
   if (!id) {
@@ -49,6 +50,17 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   if (!job) {
     throw new Response("Job not found", { status: 404 });
   }
+
+  const analyzedCount = job.products.filter((p) => p.status === "ANALYZED").length;
+  const syncedCount = job.products.filter((p) => p.status === "SYNCED").length;
+  logger.info("JOB_DETAIL_VIEWED", {
+    shop,
+    jobId: id,
+    jobStatus: job.status,
+    totalItems: job.totalItems,
+    analyzed: analyzedCount,
+    synced: syncedCount,
+  });
 
   return json({
     job: {
@@ -77,7 +89,8 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
 };
 
 export const action = async ({ request, params }: ActionFunctionArgs) => {
-  const { admin } = await authenticate.admin(request);
+  const { admin, session } = await authenticate.admin(request);
+  const shop = session.shop;
   const { id } = params;
   const formData = await request.formData();
   const action = formData.get("action");
@@ -118,7 +131,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       });
 
       if (!product || product.status !== "ANALYZED") {
-        logger.warn("SYNC_PRODUCT_SKIPPED", { productId, reason: !product ? "not_found" : "not_analyzed", status: product?.status });
+        logger.warn("SYNC_PRODUCT_SKIPPED", { shop, productId, reason: !product ? "not_found" : "not_analyzed", status: product?.status });
         continue;
       }
 
@@ -148,7 +161,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       // Sync metafields (exclude alt_text from metafields sync)
       if (syncMetafields && suggestedMetafields) {
         const { alt_text: _, ...metafieldsWithoutAlt } = suggestedMetafields;
-        logger.info("SYNC_METAFIELDS_START", { productId, title: product.title });
+        logger.info("SYNC_METAFIELDS_START", { shop, productId, title: product.title });
         const result = await updateProductMetafields(
           admin,
           productId,
@@ -158,24 +171,24 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         metaSuccess = result.success;
         metaError = result.error;
         if (!metaSuccess) {
-          logger.error("SYNC_METAFIELDS_FAILED", { productId, title: product.title, error: metaError });
+          logger.error("SYNC_METAFIELDS_FAILED", { shop, productId, title: product.title, error: metaError });
         }
       }
 
       // Sync tags
       if (syncTags && suggestedTags) {
-        logger.info("SYNC_TAGS_START", { productId, title: product.title });
+        logger.info("SYNC_TAGS_START", { shop, productId, title: product.title });
         const result = await updateProductTags(admin, productId, suggestedTags);
         tagSuccess = result.success;
         tagError = result.error;
         if (!tagSuccess) {
-          logger.error("SYNC_TAGS_FAILED", { productId, title: product.title, error: tagError });
+          logger.error("SYNC_TAGS_FAILED", { shop, productId, title: product.title, error: tagError });
         }
       }
 
       // Sync alt text (use edited alt text if available)
       if (syncAltText && altText) {
-        logger.info("SYNC_ALT_TEXT_START", { productId, title: product.title });
+        logger.info("SYNC_ALT_TEXT_START", { shop, productId, title: product.title });
         const result = await updateProductImageAlt(
           admin,
           productId,
@@ -184,7 +197,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         altTextSuccess = result.success;
         altTextError = result.error;
         if (!altTextSuccess) {
-          logger.error("SYNC_ALT_TEXT_FAILED", { productId, title: product.title, error: altTextError });
+          logger.error("SYNC_ALT_TEXT_FAILED", { shop, productId, title: product.title, error: altTextError });
         }
       }
 
@@ -195,7 +208,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         const metaDescription = productEdits?.meta_description ?? product.suggestedMetaDescription;
 
         if (description || seoTitle || metaDescription) {
-          logger.info("SYNC_DESCRIPTION_SEO_START", { productId, title: product.title });
+          logger.info("SYNC_DESCRIPTION_SEO_START", { shop, productId, title: product.title });
           const result = await updateProductDescriptionAndSeo(
             admin,
             productId,
@@ -206,7 +219,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
           descSuccess = result.success;
           descError = result.error;
           if (!descSuccess) {
-            logger.error("SYNC_DESCRIPTION_SEO_FAILED", { productId, title: product.title, error: descError });
+            logger.error("SYNC_DESCRIPTION_SEO_FAILED", { shop, productId, title: product.title, error: descError });
           }
         }
       }
@@ -238,7 +251,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       ? `Synced ${synced} products, ${errors} failed: ${errorMessages[0]}`
       : `Synced ${synced} products${errors > 0 ? `, ${errors} failed` : ""}`;
 
-    logger.info("SYNC_COMPLETE", { jobId: id, synced, errors, errorCount: errorMessages.length });
+    logger.info("SYNC_COMPLETE", { shop, jobId: id, synced, errors, errorCount: errorMessages.length });
 
     return json({
       success: true,
