@@ -46,6 +46,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   return new Response(
     JSON.stringify({
       status,
+      version: process.env.RAILWAY_GIT_COMMIT_SHA?.slice(0, 7) || "dev",
       timestamp: new Date().toISOString(),
       checks,
     }),
