@@ -50,6 +50,17 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   logger.info("DASHBOARD_VIEWED", { shop });
 
+  // Track journey milestone: first dashboard visit + last activity
+  const now = new Date();
+  await prisma.shopSettings.updateMany({
+    where: { shop, firstSeenAt: null },
+    data: { firstSeenAt: now },
+  });
+  await prisma.shopSettings.update({
+    where: { shop },
+    data: { lastActiveAt: now },
+  }).catch(() => {/* shop settings may not exist yet */});
+
   // Sync plan status from Shopify (Managed Pricing)
   await syncPlanFromShopify(admin, shop);
 
@@ -268,6 +279,20 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     // Queue succeeded, now deduct credits
     await useCredits(shop, products.length);
+
+    // Track journey milestone: first scan + total scans
+    const scanNow = new Date();
+    await prisma.shopSettings.updateMany({
+      where: { shop, firstScanAt: null },
+      data: { firstScanAt: scanNow },
+    });
+    await prisma.shopSettings.update({
+      where: { shop },
+      data: {
+        totalScans: { increment: 1 },
+        lastActiveAt: scanNow,
+      },
+    });
 
     logger.info("SCAN_STARTED", {
       shop,

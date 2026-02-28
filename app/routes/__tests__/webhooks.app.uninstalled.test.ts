@@ -6,6 +6,10 @@ const mocks = vi.hoisted(() => ({
     session: {
       deleteMany: vi.fn(),
     },
+    shopSettings: {
+      findUnique: vi.fn(),
+      update: vi.fn(),
+    },
   },
   authenticate: {
     webhook: vi.fn(),
@@ -42,6 +46,18 @@ describe("webhooks.app.uninstalled", () => {
       session: { id: "session-123", shop: "test-shop.myshopify.com" },
       topic: "APP_UNINSTALLED",
     });
+    mocks.prisma.shopSettings.findUnique.mockResolvedValue({
+      shop: "test-shop.myshopify.com",
+      plan: "FREE",
+      creditsUsed: 10,
+      totalScans: 1,
+      totalSynced: 0,
+      firstSeenAt: new Date("2026-02-20"),
+      firstScanAt: new Date("2026-02-20"),
+      firstSyncAt: null,
+      lastActiveAt: new Date("2026-02-20"),
+    });
+    mocks.prisma.shopSettings.update.mockResolvedValue({});
     mocks.prisma.session.deleteMany.mockResolvedValue({ count: 1 });
 
     const response = await action({ request: createMockRequest() } as any);
@@ -58,6 +74,8 @@ describe("webhooks.app.uninstalled", () => {
       session: undefined,
       topic: "APP_UNINSTALLED",
     });
+    mocks.prisma.shopSettings.findUnique.mockResolvedValue(null);
+    mocks.prisma.shopSettings.update.mockResolvedValue({});
 
     const response = await action({ request: createMockRequest() } as any);
 
@@ -72,7 +90,7 @@ describe("webhooks.app.uninstalled", () => {
       session: { id: "session-123", shop: "test-shop.myshopify.com" },
       topic: "APP_UNINSTALLED",
     });
-    mocks.prisma.session.deleteMany.mockRejectedValue(
+    mocks.prisma.shopSettings.findUnique.mockRejectedValue(
       new Error("Database error")
     );
 

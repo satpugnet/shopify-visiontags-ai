@@ -7,6 +7,10 @@ const mocks = vi.hoisted(() => ({
       findUnique: vi.fn(),
       update: vi.fn(),
     },
+    shopSettings: {
+      updateMany: vi.fn(),
+      update: vi.fn(),
+    },
   },
   authenticate: {
     admin: vi.fn(),

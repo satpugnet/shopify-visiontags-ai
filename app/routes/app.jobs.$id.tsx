@@ -253,6 +253,22 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 
     logger.info("SYNC_COMPLETE", { shop, jobId: id, synced, errors, errorCount: errorMessages.length });
 
+    // Track journey milestone: first sync + total synced
+    if (synced > 0) {
+      const syncNow = new Date();
+      await prisma.shopSettings.updateMany({
+        where: { shop, firstSyncAt: null },
+        data: { firstSyncAt: syncNow },
+      });
+      await prisma.shopSettings.update({
+        where: { shop },
+        data: {
+          totalSynced: { increment: synced },
+          lastActiveAt: syncNow,
+        },
+      });
+    }
+
     return json({
       success: true,
       synced,

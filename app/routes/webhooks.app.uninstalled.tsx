@@ -10,8 +10,33 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   try {
     logger.info("WEBHOOK_RECEIVED", { shop, topic });
 
-    // Webhook requests can trigger multiple times and after an app has already been uninstalled.
-    // If this webhook already ran, the session may have been deleted previously.
+    // Snapshot the merchant's journey state before cleanup
+    const settings = await db.shopSettings.findUnique({ where: { shop } });
+    if (settings) {
+      // Mark as uninstalled (preserve ShopSettings for analytics)
+      await db.shopSettings.update({
+        where: { shop },
+        data: { uninstalledAt: new Date() },
+      });
+
+      logger.info("SHOP_UNINSTALLED_SNAPSHOT", {
+        shop,
+        plan: settings.plan,
+        creditsUsed: settings.creditsUsed,
+        totalScans: settings.totalScans,
+        totalSynced: settings.totalSynced,
+        firstSeenAt: settings.firstSeenAt?.toISOString() ?? null,
+        firstScanAt: settings.firstScanAt?.toISOString() ?? null,
+        firstSyncAt: settings.firstSyncAt?.toISOString() ?? null,
+        lastActiveAt: settings.lastActiveAt?.toISOString() ?? null,
+        daysSinceInstall: settings.firstSeenAt
+          ? Math.floor((Date.now() - settings.firstSeenAt.getTime()) / 86400000)
+          : null,
+        activated: !!settings.firstSyncAt,
+      });
+    }
+
+    // Delete sessions (auth tokens) but keep ShopSettings for analytics
     if (session) {
       const deleted = await db.session.deleteMany({ where: { shop } });
       logger.info("SHOP_UNINSTALLED", { shop, sessionsDeleted: deleted.count });

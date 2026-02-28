@@ -24,6 +24,7 @@ import {
   PLANS,
 } from "../services/billing.server";
 import { logger } from "../services/logger.server";
+import prisma from "../db.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
@@ -41,6 +42,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     creditsUsed: billing.creditsUsed,
     creditsRemaining: billing.creditsRemaining,
   });
+
+  // Track journey milestone: last activity
+  await prisma.shopSettings.update({
+    where: { shop },
+    data: { lastActiveAt: new Date() },
+  }).catch(() => {/* ignore if shop settings don't exist yet */});
 
   return json({
     shop,

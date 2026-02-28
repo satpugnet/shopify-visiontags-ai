@@ -12,6 +12,10 @@ const mocks = vi.hoisted(() => ({
       deleteMany: vi.fn(),
       createMany: vi.fn(),
     },
+    shopSettings: {
+      updateMany: vi.fn(),
+      update: vi.fn(),
+    },
     $transaction: vi.fn(),
   },
   authenticate: {
