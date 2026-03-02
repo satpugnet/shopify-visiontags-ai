@@ -556,7 +556,7 @@ export default function JobDetail() {
     <Page
       backAction={{ content: "Dashboard", onAction: () => navigate("/app") }}
       title={`Job ${job.id.slice(0, 8)}...`}
-      subtitle={`Created ${new Date(job.createdAt).toLocaleString()}`}
+      subtitle={`Created ${new Date(job.createdAt).toLocaleString("en-US")}`}
     >
       <TitleBar title="Job Details" />
 

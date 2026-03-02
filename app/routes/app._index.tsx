@@ -86,7 +86,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           nodes {
             id
             title
-            productsCount(limit: null) {
+            productsCount {
               count
             }
           }
@@ -343,9 +343,9 @@ export default function Dashboard() {
   };
 
   const collectionOptions = [
-    { label: "All products", value: "all" },
+    { label: `All products (${productCount})`, value: "all" },
     ...collections.map((c) => ({
-      label: `${c.title} (${c.productsCount} products)`,
+      label: `${c.title} (${c.productsCount} ${c.productsCount === 1 ? "product" : "products"})`,
       value: c.id,
     })),
   ];
@@ -373,7 +373,7 @@ export default function Dashboard() {
       {job.status}
     </Badge>,
     `${job.processed}/${job.totalItems}`,
-    new Date(job.createdAt).toLocaleDateString(),
+    new Date(job.createdAt).toLocaleDateString("en-US"),
   ]);
 
   return (

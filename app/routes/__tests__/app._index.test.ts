@@ -67,7 +67,7 @@ vi.mock("../../services/billing.server", () => ({
 }));
 
 // Import after mocking
-import { action } from "../app._index";
+import { action, loader } from "../app._index";
 
 // Test fixtures
 const mockAdmin = { graphql: vi.fn() };
@@ -284,5 +284,65 @@ describe("app._index action", () => {
     expect(data.success).toBe(false);
     expect(mocks.fetchAllProducts).not.toHaveBeenCalled();
     expect(mocks.prisma.job.create).not.toHaveBeenCalled();
+  });
+});
+
+describe("app._index loader", () => {
+  function createLoaderRequest() {
+    return new Request("https://app.example.com/app", { method: "GET" });
+  }
+
+  beforeEach(() => {
+    // Loader calls syncPlanFromShopify, cleanupStaleJobs, countProducts, getShopBilling, getPlanPickerUrl
+    mocks.syncPlanFromShopify.mockResolvedValue({ plan: "FREE", synced: false });
+    mocks.cleanupStaleJobs.mockResolvedValue(undefined);
+    mocks.countProducts.mockResolvedValue(10);
+    mocks.getShopBilling.mockResolvedValue({
+      plan: "FREE",
+      creditsUsed: 5,
+      creditLimit: 50,
+      creditsRemaining: 45,
+      billingPeriodStart: new Date(),
+      autoSyncEnabled: false,
+    });
+    mocks.getPlanPickerUrl.mockReturnValue("https://admin.shopify.com/store/test/charges/visiontags/pricing_plans");
+    mocks.prisma.job.findMany.mockResolvedValue([]);
+    mocks.prisma.shopSettings.updateMany.mockResolvedValue({ count: 0 });
+    mocks.prisma.shopSettings.update.mockResolvedValue({});
+  });
+
+  it("returns collections from GraphQL in loader response", async () => {
+    mockAdmin.graphql.mockResolvedValue({
+      json: () => Promise.resolve({
+        data: {
+          collections: {
+            nodes: [
+              { id: "gid://shopify/Collection/1", title: "Summer Sale", productsCount: { count: 15 } },
+              { id: "gid://shopify/Collection/2", title: "New Arrivals", productsCount: { count: 8 } },
+            ],
+          },
+        },
+      }),
+    });
+
+    const response = await loader({ request: createLoaderRequest() } as any);
+    const data = await response.json();
+
+    expect(data.collections).toEqual([
+      { id: "gid://shopify/Collection/1", title: "Summer Sale", productsCount: 15 },
+      { id: "gid://shopify/Collection/2", title: "New Arrivals", productsCount: 8 },
+    ]);
+  });
+
+  it("returns empty collections when GraphQL query fails", async () => {
+    mockAdmin.graphql.mockRejectedValue(new Error("Field 'productsCount' doesn't accept argument 'limit'"));
+
+    const response = await loader({ request: createLoaderRequest() } as any);
+    const data = await response.json();
+
+    expect(data.collections).toEqual([]);
+    // Loader should still return other data successfully
+    expect(data.productCount).toBe(10);
+    expect(data.billing.plan).toBe("FREE");
   });
 });
