@@ -19,7 +19,7 @@ const mocks = vi.hoisted(() => ({
   },
   queueProductAnalysis: vi.fn(),
   hasAvailableCredits: vi.fn(),
-  useCredits: vi.fn(),
+  consumeCredits: vi.fn(),
 }));
 
 // Mock modules
@@ -37,7 +37,7 @@ vi.mock("../../services/queue.server", () => ({
 
 vi.mock("../../services/billing.server", () => ({
   hasAvailableCredits: mocks.hasAvailableCredits,
-  useCredits: mocks.useCredits,
+  consumeCredits: mocks.consumeCredits,
 }));
 
 // Import after mocking
@@ -166,7 +166,7 @@ describe("webhooks.products.create", () => {
     mocks.prisma.job.create.mockResolvedValue(mockJob);
     mocks.prisma.product.create.mockResolvedValue({});
     mocks.queueProductAnalysis.mockResolvedValue({});
-    mocks.useCredits.mockResolvedValue({ success: true, remaining: 10 });
+    mocks.consumeCredits.mockResolvedValue({ success: true, remaining: 10 });
 
     const response = await action({ request: createMockRequest() } as any);
 
@@ -195,7 +195,7 @@ describe("webhooks.products.create", () => {
       mockProductPayload.image.src,
       "test-shop.myshopify.com"
     );
-    expect(mocks.useCredits).toHaveBeenCalledWith("test-shop.myshopify.com", 1);
+    expect(mocks.consumeCredits).toHaveBeenCalledWith("test-shop.myshopify.com", 1);
   });
 
   it("should clean up job if queueing fails", async () => {
@@ -221,7 +221,7 @@ describe("webhooks.products.create", () => {
     expect(mocks.prisma.job.delete).toHaveBeenCalledWith({
       where: { id: mockJob.id },
     });
-    expect(mocks.useCredits).not.toHaveBeenCalled(); // Don't charge if queue fails
+    expect(mocks.consumeCredits).not.toHaveBeenCalled(); // Don't charge if queue fails
   });
 
   it("should return 200 even when internal error occurs", async () => {
@@ -256,12 +256,12 @@ describe("webhooks.products.create", () => {
     mocks.prisma.job.create.mockResolvedValue(mockJob);
     mocks.prisma.product.create.mockResolvedValue({});
     mocks.queueProductAnalysis.mockResolvedValue({});
-    mocks.useCredits.mockRejectedValue(new Error("Credit deduction failed"));
+    mocks.consumeCredits.mockRejectedValue(new Error("Credit deduction failed"));
 
     const response = await action({ request: createMockRequest() } as any);
 
     expect(response.status).toBe(200);
-    // Queue should have been called even though useCredits failed
+    // Queue should have been called even though consumeCredits failed
     expect(mocks.queueProductAnalysis).toHaveBeenCalled();
   });
 
@@ -280,7 +280,7 @@ describe("webhooks.products.create", () => {
     mocks.prisma.job.create.mockResolvedValue(mockJob);
     mocks.prisma.product.create.mockResolvedValue({});
     mocks.queueProductAnalysis.mockResolvedValue({});
-    mocks.useCredits.mockResolvedValue({ success: true });
+    mocks.consumeCredits.mockResolvedValue({ success: true });
 
     await action({ request: createMockRequest() } as any);
 

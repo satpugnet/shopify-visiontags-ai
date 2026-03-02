@@ -15,7 +15,7 @@ import db from "../db.server";
 import { logger } from "../services/logger.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { shop, topic, payload } = await authenticate.webhook(request);
+  const { shop, topic } = await authenticate.webhook(request);
 
   logger.info("WEBHOOK_RECEIVED", { shop, topic, handler: "compliance" });
 

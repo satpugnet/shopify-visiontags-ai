@@ -16,7 +16,6 @@ import {
   Thumbnail,
   useIndexResourceState,
   Checkbox,
-  Collapsible,
   Box,
   Tag,
   Divider,

@@ -26,7 +26,7 @@ const mocks = vi.hoisted(() => ({
   queueBulkAnalysis: vi.fn(),
   cleanupStaleJobs: vi.fn(),
   hasAvailableCredits: vi.fn(),
-  useCredits: vi.fn(),
+  consumeCredits: vi.fn(),
   getShopBilling: vi.fn(),
   syncPlanFromShopify: vi.fn(),
   getPlanPickerUrl: vi.fn(),
@@ -59,7 +59,7 @@ vi.mock("../../services/queue.server", () => ({
 
 vi.mock("../../services/billing.server", () => ({
   hasAvailableCredits: mocks.hasAvailableCredits,
-  useCredits: mocks.useCredits,
+  consumeCredits: mocks.consumeCredits,
   getShopBilling: mocks.getShopBilling,
   syncPlanFromShopify: mocks.syncPlanFromShopify,
   getPlanPickerUrl: mocks.getPlanPickerUrl,
@@ -143,7 +143,7 @@ describe("app._index action", () => {
     mocks.prisma.job.create.mockResolvedValue(mockJob);
     mocks.prisma.$transaction.mockResolvedValue([{}, {}]);
     mocks.queueBulkAnalysis.mockResolvedValue(undefined);
-    mocks.useCredits.mockResolvedValue({ success: true, remaining: 48 });
+    mocks.consumeCredits.mockResolvedValue({ success: true, remaining: 48 });
 
     const response = await action({ request: createScanRequest() } as any);
     const data = await response.json();
@@ -199,11 +199,11 @@ describe("app._index action", () => {
     mocks.prisma.job.create.mockResolvedValue(mockJob);
     mocks.prisma.$transaction.mockResolvedValue([{}, {}]);
     mocks.queueBulkAnalysis.mockResolvedValue(undefined);
-    mocks.useCredits.mockResolvedValue({ success: true, remaining: 48 });
+    mocks.consumeCredits.mockResolvedValue({ success: true, remaining: 48 });
 
     await action({ request: createScanRequest() } as any);
 
-    expect(mocks.useCredits).toHaveBeenCalledWith("test.myshopify.com", 2);
+    expect(mocks.consumeCredits).toHaveBeenCalledWith("test.myshopify.com", 2);
     expect(mocks.hasAvailableCredits).toHaveBeenCalledWith("test.myshopify.com", 2);
   });
 
@@ -213,7 +213,7 @@ describe("app._index action", () => {
     mocks.prisma.job.create.mockResolvedValue(mockJob);
     mocks.prisma.$transaction.mockResolvedValue([{}, {}]);
     mocks.queueBulkAnalysis.mockResolvedValue(undefined);
-    mocks.useCredits.mockResolvedValue({ success: true });
+    mocks.consumeCredits.mockResolvedValue({ success: true });
 
     const collectionGid = "gid://shopify/Collection/42";
     await action({ request: createScanRequest(collectionGid) } as any);
@@ -232,7 +232,7 @@ describe("app._index action", () => {
     mocks.prisma.job.create.mockResolvedValue(mockJob);
     mocks.prisma.$transaction.mockResolvedValue([{}, {}]);
     mocks.queueBulkAnalysis.mockResolvedValue(undefined);
-    mocks.useCredits.mockResolvedValue({ success: true });
+    mocks.consumeCredits.mockResolvedValue({ success: true });
 
     // Free plan: limit 50
     await action({ request: createScanRequest() } as any);
@@ -247,7 +247,7 @@ describe("app._index action", () => {
     mocks.prisma.job.create.mockResolvedValue(mockJob);
     mocks.prisma.$transaction.mockResolvedValue([{}, {}]);
     mocks.queueBulkAnalysis.mockResolvedValue(undefined);
-    mocks.useCredits.mockResolvedValue({ success: true });
+    mocks.consumeCredits.mockResolvedValue({ success: true });
 
     await action({ request: createScanRequest() } as any);
     expect(mocks.fetchAllProducts).toHaveBeenCalledWith(mockAdmin, 500);
@@ -267,7 +267,7 @@ describe("app._index action", () => {
     expect(data.success).toBe(false);
     expect(data.error).toContain("Failed to start scan");
     // Credits should not be deducted if queue fails
-    expect(mocks.useCredits).not.toHaveBeenCalled();
+    expect(mocks.consumeCredits).not.toHaveBeenCalled();
     // Job should be marked as FAILED
     expect(mocks.prisma.job.update).toHaveBeenCalledWith({
       where: { id: "job-abc-123" },

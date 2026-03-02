@@ -3,7 +3,7 @@
  * Handles async image analysis jobs
  */
 
-import { Queue, Worker, Job as BullJob } from "bullmq";
+import { Queue, Worker, type Job as BullJob } from "bullmq";
 import * as Sentry from "@sentry/remix";
 import { analyzeProductImage, isVisionError } from "./vision.server";
 import { logger } from "./logger.server";

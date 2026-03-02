@@ -9,7 +9,7 @@ import * as Sentry from "@sentry/remix";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { queueProductAnalysis } from "../services/queue.server";
-import { hasAvailableCredits, useCredits } from "../services/billing.server";
+import { hasAvailableCredits, consumeCredits } from "../services/billing.server";
 import { logger } from "../services/logger.server";
 
 interface ProductUpdatePayload {
@@ -115,7 +115,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     // Deduct credit
     try {
-      await useCredits(shop, 1);
+      await consumeCredits(shop, 1);
     } catch (creditError) {
       logger.error("CREDIT_DEDUCT_FAILED", {
         shop,

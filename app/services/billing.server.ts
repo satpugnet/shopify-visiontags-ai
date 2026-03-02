@@ -124,7 +124,7 @@ export async function hasAvailableCredits(
  * Use credits for a shop (atomic to prevent race conditions)
  * Uses raw SQL to atomically check and increment in a single query
  */
-export async function useCredits(
+export async function consumeCredits(
   shop: string,
   count: number
 ): Promise<{ success: boolean; remaining: number }> {

@@ -13,13 +13,17 @@ const REQUIRED_ENV_VARS = [
 
 const OPTIONAL_BUT_RECOMMENDED = [
   "REDIS_URL", // Required for queue processing
-  "ANTHROPIC_API_KEY", // Required for AI analysis
+  "OPENROUTER_API_KEY", // Required for AI analysis (via OpenRouter Anthropic Skin)
+  "SENTRY_DSN", // Error tracking
+  "SHOPIFY_APP_HANDLE", // For Managed Pricing plan picker URLs
 ] as const;
 
 export interface EnvConfig {
   DATABASE_URL: string;
   REDIS_URL?: string;
-  ANTHROPIC_API_KEY?: string;
+  OPENROUTER_API_KEY?: string;
+  SENTRY_DSN?: string;
+  SHOPIFY_APP_HANDLE?: string;
   SHOPIFY_API_KEY: string;
   SHOPIFY_API_SECRET: string;
   SHOPIFY_APP_URL: string;
@@ -67,7 +71,9 @@ export function validateEnv(): EnvConfig {
   return {
     DATABASE_URL: process.env.DATABASE_URL!,
     REDIS_URL: process.env.REDIS_URL,
-    ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
+    OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY,
+    SENTRY_DSN: process.env.SENTRY_DSN,
+    SHOPIFY_APP_HANDLE: process.env.SHOPIFY_APP_HANDLE,
     SHOPIFY_API_KEY: process.env.SHOPIFY_API_KEY!,
     SHOPIFY_API_SECRET: process.env.SHOPIFY_API_SECRET!,
     SHOPIFY_APP_URL: process.env.SHOPIFY_APP_URL!,

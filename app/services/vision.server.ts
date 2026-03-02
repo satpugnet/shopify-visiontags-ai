@@ -6,6 +6,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import * as Sentry from "@sentry/remix";
 import { logger } from "./logger.server";
+import { withRetry } from "./retry.server";
 
 // Initialize Anthropic client via OpenRouter's Anthropic Skin
 const anthropic = new Anthropic({
@@ -16,50 +17,6 @@ const anthropic = new Anthropic({
     "X-Title": "VisionTags",
   },
 });
-
-/**
- * Retry a function with exponential backoff
- * Handles rate limits (429) and transient errors
- */
-async function withRetry<T>(
-  fn: () => Promise<T>,
-  options: { maxRetries?: number; baseDelayMs?: number; maxDelayMs?: number } = {}
-): Promise<T> {
-  const { maxRetries = 3, baseDelayMs = 1000, maxDelayMs = 30000 } = options;
-
-  let lastError: Error | null = null;
-
-  for (let attempt = 0; attempt < maxRetries; attempt++) {
-    try {
-      return await fn();
-    } catch (error) {
-      lastError = error instanceof Error ? error : new Error(String(error));
-
-      // Check if this is a rate limit error (429) or server error (5xx)
-      const isRetryable =
-        lastError.message.includes("429") ||
-        lastError.message.includes("rate") ||
-        lastError.message.includes("500") ||
-        lastError.message.includes("502") ||
-        lastError.message.includes("503") ||
-        lastError.message.includes("timeout");
-
-      if (!isRetryable || attempt === maxRetries - 1) {
-        throw lastError;
-      }
-
-      // Exponential backoff with jitter
-      const delay = Math.min(
-        baseDelayMs * Math.pow(2, attempt) + Math.random() * 1000,
-        maxDelayMs
-      );
-      logger.warn("VISION_API_RETRY", { attempt: attempt + 1, maxRetries, delayMs: Math.round(delay) });
-      await new Promise((resolve) => setTimeout(resolve, delay));
-    }
-  }
-
-  throw lastError;
-}
 
 // The AI prompt for hybrid metafields + tags + alt text output
 const VISION_PROMPT = `Analyze this product image for an e-commerce store.
@@ -235,7 +192,7 @@ export async function analyzeProductImage(
             },
           ],
         }),
-      { maxRetries: 3, baseDelayMs: 2000 }
+      { maxRetries: 3, baseDelayMs: 2000, logEvent: "VISION_API_RETRY" }
     );
 
     // Extract text content from response

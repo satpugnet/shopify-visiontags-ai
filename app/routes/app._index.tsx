@@ -148,7 +148,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     // Import services
     const { fetchAllProducts, fetchCollectionProducts } = await import("../services/products.server");
     const { queueBulkAnalysis } = await import("../services/queue.server");
-    const { hasAvailableCredits, useCredits } = await import(
+    const { hasAvailableCredits, consumeCredits } = await import(
       "../services/billing.server"
     );
 
@@ -278,7 +278,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     // Queue succeeded, now deduct credits
-    await useCredits(shop, products.length);
+    await consumeCredits(shop, products.length);
 
     // Track journey milestone: first scan + total scans
     const scanNow = new Date();
@@ -315,7 +315,7 @@ type ActionData = {
 };
 
 export default function Dashboard() {
-  const { shop, productCount, billing, jobs, proFeatures, proPrice, planPickerUrl, collections } = useLoaderData<typeof loader>();
+  const { productCount, billing, jobs, proFeatures, proPrice, planPickerUrl, collections } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<ActionData>();
   const shopify = useAppBridge();
   const [selectedCollection, setSelectedCollection] = useState("all");

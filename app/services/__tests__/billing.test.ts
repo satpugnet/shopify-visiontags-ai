@@ -25,7 +25,7 @@ import {
   getOrCreateShopSettings,
   getShopBilling,
   hasAvailableCredits,
-  useCredits,
+  consumeCredits,
   resetCredits,
   upgradeToProPlan,
   downgradeToFreePlan,
@@ -362,7 +362,7 @@ describe("hasAvailableCredits (integration)", () => {
   });
 });
 
-describe("useCredits (integration)", () => {
+describe("consumeCredits (integration)", () => {
   it("should atomically increment credits and return remaining", async () => {
     // Atomic update succeeds (1 row updated)
     prismaMock.$executeRawUnsafe.mockResolvedValue(1);
@@ -372,7 +372,7 @@ describe("useCredits (integration)", () => {
     } as any);
     prismaMock.usageRecord.upsert.mockResolvedValue({} as any);
 
-    const result = await useCredits("test-shop.myshopify.com", 5);
+    const result = await consumeCredits("test-shop.myshopify.com", 5);
 
     expect(result.success).toBe(true);
     expect(result.remaining).toBe(15);
@@ -391,7 +391,7 @@ describe("useCredits (integration)", () => {
       creditsUsed: 48,
     } as any);
 
-    const result = await useCredits("test-shop.myshopify.com", 10);
+    const result = await consumeCredits("test-shop.myshopify.com", 10);
 
     expect(result.success).toBe(false);
     expect(result.remaining).toBe(2);
@@ -405,7 +405,7 @@ describe("useCredits (integration)", () => {
     } as any);
     prismaMock.usageRecord.upsert.mockResolvedValue({} as any);
 
-    await useCredits("test-shop.myshopify.com", 5);
+    await consumeCredits("test-shop.myshopify.com", 5);
 
     expect(prismaMock.usageRecord.upsert).toHaveBeenCalled();
   });
@@ -594,7 +594,7 @@ describe("syncPlanFromShopify (integration)", () => {
   });
 });
 
-describe("useCredits - atomic double-spend prevention (integration)", () => {
+describe("consumeCredits - atomic double-spend prevention (integration)", () => {
   it("should call $executeRawUnsafe with correct SQL and params for atomic check", async () => {
     prismaMock.$executeRawUnsafe.mockResolvedValue(1);
     prismaMock.shopSettings.findUnique.mockResolvedValue({
@@ -603,7 +603,7 @@ describe("useCredits - atomic double-spend prevention (integration)", () => {
     } as any);
     prismaMock.usageRecord.upsert.mockResolvedValue({} as any);
 
-    await useCredits("test-shop.myshopify.com", 1);
+    await consumeCredits("test-shop.myshopify.com", 1);
 
     expect(prismaMock.$executeRawUnsafe).toHaveBeenCalledTimes(1);
     expect(prismaMock.$executeRawUnsafe).toHaveBeenCalledWith(

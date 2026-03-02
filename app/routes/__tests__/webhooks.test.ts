@@ -98,21 +98,21 @@ describe("products/create webhook - Credit Deduction Timing", () => {
 
     // Simulate queue failure
     const queueProductAnalysis = vi.fn().mockRejectedValue(new Error("Redis connection failed"));
-    const useCredits = vi.fn().mockImplementation(() => {
+    const consumeCredits = vi.fn().mockImplementation(() => {
       creditsDeducted = true;
     });
 
     try {
       await queueProductAnalysis("job-1", "product-1", "http://image.jpg", "shop");
       queueSucceeded = true;
-      await useCredits("shop", 1);
+      await consumeCredits("shop", 1);
     } catch {
       // Queue failed - don't deduct credits
     }
 
     expect(queueSucceeded).toBe(false);
     expect(creditsDeducted).toBe(false);
-    expect(useCredits).not.toHaveBeenCalled();
+    expect(consumeCredits).not.toHaveBeenCalled();
   });
 
   it("should deduct credits when queue operation succeeds", async () => {
@@ -120,19 +120,19 @@ describe("products/create webhook - Credit Deduction Timing", () => {
 
     // Simulate queue success
     const queueProductAnalysis = vi.fn().mockResolvedValue({ id: "job-123" });
-    const useCredits = vi.fn().mockImplementation(() => {
+    const consumeCredits = vi.fn().mockImplementation(() => {
       creditsDeducted = true;
       return { success: true, remaining: 49 };
     });
 
     try {
       await queueProductAnalysis("job-1", "product-1", "http://image.jpg", "shop");
-      await useCredits("shop", 1);
+      await consumeCredits("shop", 1);
     } catch {
       // Should not reach here
     }
 
-    expect(useCredits).toHaveBeenCalledWith("shop", 1);
+    expect(consumeCredits).toHaveBeenCalledWith("shop", 1);
     expect(creditsDeducted).toBe(true);
   });
 });

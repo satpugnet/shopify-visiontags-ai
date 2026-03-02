@@ -5,53 +5,7 @@
 
 import type { AdminApiContext } from "@shopify/shopify-app-remix/server";
 import { logger } from "./logger.server";
-
-/**
- * Retry a function with exponential backoff
- * Handles Shopify API rate limits (429) and transient errors
- */
-async function withRetry<T>(
-  fn: () => Promise<T>,
-  options: { maxRetries?: number; baseDelayMs?: number; maxDelayMs?: number } = {}
-): Promise<T> {
-  const { maxRetries = 3, baseDelayMs = 1000, maxDelayMs = 30000 } = options;
-
-  let lastError: Error | null = null;
-
-  for (let attempt = 0; attempt < maxRetries; attempt++) {
-    try {
-      return await fn();
-    } catch (error) {
-      lastError = error instanceof Error ? error : new Error(String(error));
-
-      // Check if this is a rate limit error or server error
-      const errorMsg = lastError.message.toLowerCase();
-      const isRetryable =
-        errorMsg.includes("429") ||
-        errorMsg.includes("throttled") ||
-        errorMsg.includes("rate") ||
-        errorMsg.includes("500") ||
-        errorMsg.includes("502") ||
-        errorMsg.includes("503") ||
-        errorMsg.includes("timeout") ||
-        errorMsg.includes("econnreset");
-
-      if (!isRetryable || attempt === maxRetries - 1) {
-        throw lastError;
-      }
-
-      // Exponential backoff with jitter
-      const delay = Math.min(
-        baseDelayMs * Math.pow(2, attempt) + Math.random() * 1000,
-        maxDelayMs
-      );
-      logger.warn("SHOPIFY_API_RETRY", { attempt: attempt + 1, maxRetries, delayMs: Math.round(delay) });
-      await new Promise((resolve) => setTimeout(resolve, delay));
-    }
-  }
-
-  throw lastError;
-}
+import { withRetry } from "./retry.server";
 
 export interface ShopifyProduct {
   id: string;
@@ -182,7 +136,7 @@ export async function fetchAllProducts(
               },
             }
           ),
-        { maxRetries: 3, baseDelayMs: 1000 }
+        { maxRetries: 3, baseDelayMs: 1000, logEvent: "SHOPIFY_API_RETRY" }
       );
 
       const data = (await response.json()) as ProductsQueryResponse;

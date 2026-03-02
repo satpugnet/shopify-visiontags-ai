@@ -20,7 +20,7 @@ const mocks = vi.hoisted(() => ({
   },
   queueProductAnalysis: vi.fn(),
   hasAvailableCredits: vi.fn(),
-  useCredits: vi.fn(),
+  consumeCredits: vi.fn(),
 }));
 
 // Mock modules
@@ -38,7 +38,7 @@ vi.mock("../../services/queue.server", () => ({
 
 vi.mock("../../services/billing.server", () => ({
   hasAvailableCredits: mocks.hasAvailableCredits,
-  useCredits: mocks.useCredits,
+  consumeCredits: mocks.consumeCredits,
 }));
 
 // Import after mocking
@@ -195,7 +195,7 @@ describe("webhooks.products.update", () => {
     mocks.prisma.job.create.mockResolvedValue(mockJob);
     mocks.prisma.product.create.mockResolvedValue({});
     mocks.queueProductAnalysis.mockResolvedValue({});
-    mocks.useCredits.mockResolvedValue({ success: true, remaining: 10 });
+    mocks.consumeCredits.mockResolvedValue({ success: true, remaining: 10 });
 
     const response = await action({ request: createMockRequest() } as any);
 
@@ -224,7 +224,7 @@ describe("webhooks.products.update", () => {
       mockProductPayload.image.src,
       "test-shop.myshopify.com"
     );
-    expect(mocks.useCredits).toHaveBeenCalledWith("test-shop.myshopify.com", 1);
+    expect(mocks.consumeCredits).toHaveBeenCalledWith("test-shop.myshopify.com", 1);
   });
 
   it("should return 200 even when internal error occurs", async () => {
