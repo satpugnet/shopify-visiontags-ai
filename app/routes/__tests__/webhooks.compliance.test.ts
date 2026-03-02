@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
       deleteMany: vi.fn(),
     },
     shopSettings: {
+      findUnique: vi.fn(),
       deleteMany: vi.fn(),
     },
   },
@@ -112,7 +113,7 @@ describe("webhooks.compliance (unified handler)", () => {
     });
   }
 
-  it("should handle SHOP_REDACT and delete all data in order", async () => {
+  it("should snapshot journey data then delete all data in order", async () => {
     mocks.authenticate.webhook.mockResolvedValue({
       shop: "test-shop.myshopify.com",
       topic: "SHOP_REDACT",
@@ -120,6 +121,19 @@ describe("webhooks.compliance (unified handler)", () => {
     });
     // No active session (shop did NOT reinstall)
     mocks.prisma.session.findFirst.mockResolvedValue(null);
+    // Return journey data for snapshot
+    mocks.prisma.shopSettings.findUnique.mockResolvedValue({
+      shop: "test-shop.myshopify.com",
+      plan: "FREE",
+      creditsUsed: 10,
+      totalScans: 3,
+      totalSynced: 5,
+      firstSeenAt: new Date("2026-02-15"),
+      firstScanAt: new Date("2026-02-16"),
+      firstSyncAt: null,
+      lastActiveAt: new Date("2026-02-20"),
+      uninstalledAt: new Date("2026-02-25"),
+    });
     mocks.prisma.product.deleteMany.mockResolvedValue({ count: 10 });
     mocks.prisma.job.deleteMany.mockResolvedValue({ count: 5 });
     mocks.prisma.usageRecord.deleteMany.mockResolvedValue({ count: 3 });
@@ -130,44 +144,24 @@ describe("webhooks.compliance (unified handler)", () => {
 
     expect(response.status).toBe(200);
 
-    // Verify all deletions happened in correct order (products first due to foreign keys)
-    const deleteOrder = [
-      mocks.prisma.product.deleteMany,
-      mocks.prisma.job.deleteMany,
-      mocks.prisma.usageRecord.deleteMany,
-      mocks.prisma.shopSettings.deleteMany,
-      mocks.prisma.session.deleteMany,
-    ];
-
-    for (const deleteFn of deleteOrder) {
-      expect(deleteFn).toHaveBeenCalled();
-    }
-
-    // Verify products deleted by job's shop
-    expect(mocks.prisma.product.deleteMany).toHaveBeenCalledWith({
-      where: {
-        job: {
-          shop: "test-shop.myshopify.com",
-        },
-      },
+    // Verify snapshot was read before deletion
+    expect(mocks.prisma.shopSettings.findUnique).toHaveBeenCalledWith({
+      where: { shop: "test-shop.myshopify.com" },
     });
 
-    // Verify jobs deleted by shop
+    // Verify all deletions happened
+    expect(mocks.prisma.product.deleteMany).toHaveBeenCalledWith({
+      where: { job: { shop: "test-shop.myshopify.com" } },
+    });
     expect(mocks.prisma.job.deleteMany).toHaveBeenCalledWith({
       where: { shop: "test-shop.myshopify.com" },
     });
-
-    // Verify usage records deleted by shop
     expect(mocks.prisma.usageRecord.deleteMany).toHaveBeenCalledWith({
       where: { shop: "test-shop.myshopify.com" },
     });
-
-    // Verify shop settings deleted by shop
     expect(mocks.prisma.shopSettings.deleteMany).toHaveBeenCalledWith({
       where: { shop: "test-shop.myshopify.com" },
     });
-
-    // Verify sessions deleted by shop
     expect(mocks.prisma.session.deleteMany).toHaveBeenCalledWith({
       where: { shop: "test-shop.myshopify.com" },
     });

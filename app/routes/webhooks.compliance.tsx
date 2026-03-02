@@ -71,6 +71,27 @@ async function handleShopRedact(shop: string): Promise<Response> {
       return new Response(null, { status: 200 });
     }
 
+    // Snapshot journey data before GDPR-required deletion
+    const settings = await db.shopSettings.findUnique({ where: { shop } });
+    if (settings) {
+      logger.info("SHOP_REDACT_SNAPSHOT", {
+        shop,
+        plan: settings.plan,
+        creditsUsed: settings.creditsUsed,
+        totalScans: settings.totalScans,
+        totalSynced: settings.totalSynced,
+        firstSeenAt: settings.firstSeenAt?.toISOString() ?? null,
+        firstScanAt: settings.firstScanAt?.toISOString() ?? null,
+        firstSyncAt: settings.firstSyncAt?.toISOString() ?? null,
+        lastActiveAt: settings.lastActiveAt?.toISOString() ?? null,
+        uninstalledAt: settings.uninstalledAt?.toISOString() ?? null,
+        daysSinceInstall: settings.firstSeenAt
+          ? Math.floor((Date.now() - settings.firstSeenAt.getTime()) / 86400000)
+          : null,
+        activated: !!settings.firstSyncAt,
+      });
+    }
+
     // Delete all shop data in the correct order (respecting foreign keys)
 
     const deletedProducts = await db.product.deleteMany({
