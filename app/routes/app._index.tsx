@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { useLoaderData, useFetcher, Link as RemixLink } from "@remix-run/react";
+import { useLoaderData, useFetcher, Link as RemixLink, useNavigate, useRevalidator } from "@remix-run/react";
 import {
   Page,
   Layout,
@@ -119,6 +119,15 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     },
   });
 
+  // Check if most recent completed job has unsynced products
+  const recentJob = jobs[0];
+  let pendingSyncCount = 0;
+  if (recentJob && recentJob.status === "COMPLETED") {
+    pendingSyncCount = await prisma.product.count({
+      where: { jobId: recentJob.id, status: "ANALYZED" },
+    });
+  }
+
   return json({
     shop,
     productCount,
@@ -127,6 +136,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     proPrice: PLANS.PRO.price,
     planPickerUrl,
     collections,
+    pendingSyncCount,
+    recentJobId: recentJob?.id ?? null,
     jobs: jobs.map((job) => ({
       id: job.id,
       status: job.status,
@@ -314,10 +325,22 @@ type ActionData = {
   error?: string;
 };
 
+function relativeTime(dateStr: string): string {
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const minutes = Math.floor(diff / 60000);
+  if (minutes < 1) return "Just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return new Date(dateStr).toLocaleDateString("en-US");
+}
+
 export default function Dashboard() {
-  const { productCount, billing, jobs, proFeatures, proPrice, planPickerUrl, collections } = useLoaderData<typeof loader>();
+  const { productCount, billing, jobs, proFeatures, proPrice, planPickerUrl, collections, pendingSyncCount, recentJobId } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<ActionData>();
   const shopify = useAppBridge();
+  const navigate = useNavigate();
+  const revalidator = useRevalidator();
   const [selectedCollection, setSelectedCollection] = useState("all");
 
   const isScanning =
@@ -327,13 +350,26 @@ export default function Dashboard() {
     (job) => job.status === "QUEUED" || job.status === "PROCESSING"
   );
 
+  // Auto-redirect to job detail after scan starts
   useEffect(() => {
     if (fetcher.data?.success && fetcher.data?.jobId) {
       shopify.toast.show("AI scan started");
+      navigate(`/app/jobs/${fetcher.data.jobId}`);
     } else if (fetcher.data?.error) {
       shopify.toast.show(fetcher.data.error, { isError: true });
     }
-  }, [fetcher.data, shopify]);
+  }, [fetcher.data, shopify, navigate]);
+
+  // Auto-refresh dashboard while a scan is active
+  useEffect(() => {
+    if (!hasActiveJob) return;
+    const interval = setInterval(() => {
+      if (revalidator.state === "idle") {
+        revalidator.revalidate();
+      }
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [hasActiveJob, revalidator]);
 
   const startScan = () => {
     fetcher.submit(
@@ -356,7 +392,9 @@ export default function Dashboard() {
 
   const jobRows = jobs.map((job) => [
     <RemixLink to={`/app/jobs/${job.id}`} key={job.id}>
-      {job.id.slice(0, 8)}...
+      {job.status === "COMPLETED" ? "View Results" :
+       job.status === "PROCESSING" || job.status === "QUEUED" ? "View Progress" :
+       "View Details"}
     </RemixLink>,
     <Badge
       key={`status-${job.id}`}
@@ -373,7 +411,7 @@ export default function Dashboard() {
       {job.status}
     </Badge>,
     `${job.processed}/${job.totalItems}`,
-    new Date(job.createdAt).toLocaleDateString("en-US"),
+    relativeTime(job.createdAt),
   ]);
 
   return (
@@ -407,6 +445,19 @@ export default function Dashboard() {
             <p>
               A scan is currently running. You can view its progress below or wait for it to complete before starting a new one.
             </p>
+          </Banner>
+        )}
+
+        {pendingSyncCount > 0 && recentJobId && (
+          <Banner
+            title={`${pendingSyncCount} products are ready to sync!`}
+            tone="success"
+            action={{
+              content: "Review & Sync Results",
+              onAction: () => navigate(`/app/jobs/${recentJobId}`),
+            }}
+          >
+            <p>Your AI scan is complete. Review the suggestions and apply them to your Shopify store.</p>
           </Banner>
         )}
 
@@ -517,7 +568,7 @@ export default function Dashboard() {
             ) : (
               <DataTable
                 columnContentTypes={["text", "text", "text", "text"]}
-                headings={["Job ID", "Status", "Progress", "Created"]}
+                headings={["", "Status", "Progress", "Created"]}
                 rows={jobRows}
               />
             )}

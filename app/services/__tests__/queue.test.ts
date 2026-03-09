@@ -368,17 +368,13 @@ describe("Queue default options", () => {
 
   it("should have correct worker options", () => {
     const workerOptions = {
-      concurrency: 2,
-      limiter: {
-        max: 10,
-        duration: 60000,
-      },
+      concurrency: 5,
+      // No limiter -- withRetry in vision.server.ts handles actual 429s
     };
 
     // Verify the expected configuration
-    expect(workerOptions.concurrency).toBe(2);
-    expect(workerOptions.limiter.max).toBe(10);
-    expect(workerOptions.limiter.duration).toBe(60000);
+    expect(workerOptions.concurrency).toBe(5);
+    expect(workerOptions).not.toHaveProperty("limiter");
   });
 });
 

@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
     product: {
       deleteMany: vi.fn(),
       createMany: vi.fn(),
+      count: vi.fn(),
     },
     shopSettings: {
       updateMany: vi.fn(),
@@ -344,5 +345,37 @@ describe("app._index loader", () => {
     // Loader should still return other data successfully
     expect(data.productCount).toBe(10);
     expect(data.billing.plan).toBe("FREE");
+  });
+
+  it("returns pendingSyncCount for completed job with unsynced products", async () => {
+    mockAdmin.graphql.mockResolvedValue({
+      json: () => Promise.resolve({ data: { collections: { nodes: [] } } }),
+    });
+    mocks.prisma.job.findMany.mockResolvedValue([
+      { id: "job-completed-1", status: "COMPLETED", totalItems: 10, processed: 10, createdAt: new Date(), _count: { products: 10 } },
+    ]);
+    mocks.prisma.product.count.mockResolvedValue(8);
+
+    const response = await loader({ request: createLoaderRequest() } as any);
+    const data = await response.json();
+
+    expect(data.pendingSyncCount).toBe(8);
+    expect(data.recentJobId).toBe("job-completed-1");
+    expect(mocks.prisma.product.count).toHaveBeenCalledWith({
+      where: { jobId: "job-completed-1", status: "ANALYZED" },
+    });
+  });
+
+  it("returns pendingSyncCount 0 when no completed jobs", async () => {
+    mockAdmin.graphql.mockResolvedValue({
+      json: () => Promise.resolve({ data: { collections: { nodes: [] } } }),
+    });
+    mocks.prisma.job.findMany.mockResolvedValue([]);
+
+    const response = await loader({ request: createLoaderRequest() } as any);
+    const data = await response.json();
+
+    expect(data.pendingSyncCount).toBe(0);
+    expect(data.recentJobId).toBeNull();
   });
 });

@@ -317,11 +317,9 @@ export function startAnalysisWorker(): Worker<AnalysisJobData> {
     },
     {
       connection,
-      concurrency: 2, // Process 2 images at a time
-      limiter: {
-        max: 10, // Max 10 jobs per minute (respect API limits)
-        duration: 60000,
-      },
+      concurrency: 5, // ~1 product/sec at ~5s API latency = ~60/min
+      // No limiter -- withRetry in vision.server.ts handles actual 429s
+      // with exponential backoff. Eliminates 40-second stall periods.
     }
   );
 

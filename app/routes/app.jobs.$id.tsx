@@ -629,9 +629,8 @@ export default function JobDetail() {
             tone="info"
           >
             <List type="number">
-              <List.Item>Click "Show details" on any product to review or edit suggestions (details appear below the table)</List.Item>
-              <List.Item>Select the products you want to update using the checkboxes</List.Item>
-              <List.Item>Click "Sync" below to apply the changes to your Shopify store</List.Item>
+              <List.Item>Click "Show details" on any product to review or edit suggestions</List.Item>
+              <List.Item>Click "Sync All" to apply everything, or select specific products first</List.Item>
             </List>
           </Banner>
         )}
@@ -675,20 +674,33 @@ export default function JobDetail() {
               <InlineStack gap="300">
                 <Button
                   variant="primary"
-                  onClick={handleSync}
+                  onClick={() => {
+                    const formData = new FormData();
+                    formData.append("action", "sync");
+                    formData.append("syncMetafields", String(syncMetafields));
+                    formData.append("syncTags", String(syncTags));
+                    formData.append("syncAltText", String(syncAltText));
+                    formData.append("syncDescription", String(syncDescription));
+                    formData.append("edits", JSON.stringify(edits));
+                    analyzedProducts.forEach((p) => formData.append("productIds", p.id));
+                    fetcher.submit(formData, { method: "POST" });
+                  }}
                   loading={isSyncing}
                   disabled={
-                    selectedResources.length === 0 ||
+                    analyzedProducts.length === 0 ||
                     (!syncMetafields && !syncTags && !syncAltText && !syncDescription)
                   }
                 >
-                  {`Sync ${selectedResources.length} Selected Products`}
+                  {`Sync All ${analyzedProducts.length} Products to Shopify`}
                 </Button>
-                <Text as="span" variant="bodySm" tone="subdued">
-                  {selectedResources.length === 0
-                    ? "Select products from the table below to get started"
-                    : `${analyzedProducts.length} products ready to sync`}
-                </Text>
+                {selectedResources.length > 0 && selectedResources.length < analyzedProducts.length && (
+                  <Button
+                    onClick={handleSync}
+                    loading={isSyncing}
+                  >
+                    {`Sync ${selectedResources.length} Selected Only`}
+                  </Button>
+                )}
               </InlineStack>
             </BlockStack>
           </Card>
