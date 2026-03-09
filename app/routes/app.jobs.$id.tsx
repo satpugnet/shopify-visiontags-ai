@@ -68,6 +68,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       totalItems: job.totalItems,
       processed: job.processed,
       createdAt: job.createdAt.toISOString(),
+      syncedCount,
     },
     products: job.products.map((p) => ({
       id: p.id,
@@ -285,6 +286,23 @@ type ActionData = {
   message?: string;
   error?: string;
 };
+
+function jobDisplayStatus(job: { status: string; totalItems: number; syncedCount: number }) {
+  if (job.status === "QUEUED" || job.status === "PROCESSING") return { label: "Scanning...", tone: "info" as const };
+  if (job.status === "FAILED") return { label: "Failed", tone: "critical" as const };
+  if (job.syncedCount >= job.totalItems) return { label: "Applied", tone: "success" as const };
+  return { label: "Ready to Apply", tone: "attention" as const };
+}
+
+function productDisplayStatus(status: string) {
+  switch (status) {
+    case "PENDING": return { label: "Scanning...", tone: "info" as const };
+    case "ANALYZED": return { label: "Ready", tone: "attention" as const };
+    case "SYNCED": return { label: "Applied", tone: "success" as const };
+    case "ERROR": return { label: "Failed", tone: "critical" as const };
+    default: return { label: status, tone: "info" as const };
+  }
+}
 
 export default function JobDetail() {
   const { job, products } = useLoaderData<typeof loader>();
@@ -517,18 +535,8 @@ export default function JobDetail() {
           </BlockStack>
         </IndexTable.Cell>
         <IndexTable.Cell>
-          <Badge
-            tone={
-              product.status === "SYNCED"
-                ? "success"
-                : product.status === "ANALYZED"
-                  ? "attention"
-                  : product.status === "ERROR"
-                    ? "critical"
-                    : "info"
-            }
-          >
-            {product.status}
+          <Badge tone={productDisplayStatus(product.status).tone}>
+            {productDisplayStatus(product.status).label}
           </Badge>
         </IndexTable.Cell>
         <IndexTable.Cell>
@@ -554,10 +562,10 @@ export default function JobDetail() {
   return (
     <Page
       backAction={{ content: "Dashboard", onAction: () => navigate("/app") }}
-      title={`Job ${job.id.slice(0, 8)}...`}
-      subtitle={`Created ${new Date(job.createdAt).toLocaleString("en-US")}`}
+      title="Scan Results"
+      subtitle={`${job.totalItems} products`}
     >
-      <TitleBar title="Job Details" />
+      <TitleBar title="Scan Results" />
 
       <Box paddingBlockEnd="800">
         <BlockStack gap="500">
@@ -566,20 +574,10 @@ export default function JobDetail() {
           <BlockStack gap="400">
             <InlineStack align="space-between">
               <Text as="h2" variant="headingMd">
-                Job Status
+                Scan Status
               </Text>
-              <Badge
-                tone={
-                  job.status === "COMPLETED"
-                    ? "success"
-                    : job.status === "FAILED"
-                      ? "critical"
-                      : job.status === "PROCESSING"
-                        ? "attention"
-                        : "info"
-                }
-              >
-                {job.status}
+              <Badge tone={jobDisplayStatus(job).tone}>
+                {jobDisplayStatus(job).label}
               </Badge>
             </InlineStack>
 
@@ -630,7 +628,7 @@ export default function JobDetail() {
           >
             <List type="number">
               <List.Item>Click "Show details" on any product to review or edit suggestions</List.Item>
-              <List.Item>Click "Sync All" to apply everything, or select specific products first</List.Item>
+              <List.Item>Click "Apply All" to update your Shopify products, or select specific ones first</List.Item>
             </List>
           </Banner>
         )}
@@ -644,7 +642,7 @@ export default function JobDetail() {
                   Apply to Shopify
                 </Text>
                 <Text as="p" variant="bodySm" tone="subdued">
-                  Choose which data types to write to your selected products.
+                  Choose which data to apply to your products.
                 </Text>
               </BlockStack>
 
@@ -691,14 +689,14 @@ export default function JobDetail() {
                     (!syncMetafields && !syncTags && !syncAltText && !syncDescription)
                   }
                 >
-                  {`Sync All ${analyzedProducts.length} Products to Shopify`}
+                  {`Apply All ${analyzedProducts.length} Products to Shopify`}
                 </Button>
                 {selectedResources.length > 0 && selectedResources.length < analyzedProducts.length && (
                   <Button
                     onClick={handleSync}
                     loading={isSyncing}
                   >
-                    {`Sync ${selectedResources.length} Selected Only`}
+                    {`Apply ${selectedResources.length} Selected Only`}
                   </Button>
                 )}
               </InlineStack>

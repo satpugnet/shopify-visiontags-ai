@@ -119,6 +119,16 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     },
   });
 
+  // Get synced product counts per job
+  const syncedCounts = await prisma.product.groupBy({
+    by: ['jobId'],
+    where: { jobId: { in: jobs.map(j => j.id) }, status: 'SYNCED' },
+    _count: true,
+  });
+  const syncedMap = Object.fromEntries(
+    syncedCounts.map(r => [r.jobId, r._count])
+  );
+
   // Check if most recent completed job has unsynced products
   const recentJob = jobs[0];
   let pendingSyncCount = 0;
@@ -145,6 +155,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       processed: job.processed,
       createdAt: job.createdAt.toISOString(),
       productCount: job._count.products,
+      syncedCount: syncedMap[job.id] ?? 0,
     })),
   });
 };
@@ -325,6 +336,14 @@ type ActionData = {
   error?: string;
 };
 
+function jobDisplayStatus(job: { status: string; totalItems: number; syncedCount: number }) {
+  if (job.status === "QUEUED" || job.status === "PROCESSING") return { label: "Scanning...", tone: "info" as const };
+  if (job.status === "FAILED") return { label: "Failed", tone: "critical" as const };
+  // COMPLETED
+  if (job.syncedCount >= job.totalItems) return { label: "Applied", tone: "success" as const };
+  return { label: "Ready to Apply", tone: "attention" as const };
+}
+
 function relativeTime(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime();
   const minutes = Math.floor(diff / 60000);
@@ -390,29 +409,24 @@ export default function Dashboard() {
     (billing.creditsUsed / billing.creditLimit) * 100
   );
 
-  const jobRows = jobs.map((job) => [
-    <RemixLink to={`/app/jobs/${job.id}`} key={job.id}>
-      {job.status === "COMPLETED" ? "View Results" :
-       job.status === "PROCESSING" || job.status === "QUEUED" ? "View Progress" :
-       "View Details"}
-    </RemixLink>,
-    <Badge
-      key={`status-${job.id}`}
-      tone={
-        job.status === "COMPLETED"
-          ? "success"
-          : job.status === "FAILED"
-            ? "critical"
-            : job.status === "PROCESSING"
-              ? "attention"
-              : "info"
-      }
-    >
-      {job.status}
-    </Badge>,
-    `${job.processed}/${job.totalItems}`,
-    relativeTime(job.createdAt),
-  ]);
+  const jobRows = jobs.map((job) => {
+    const display = jobDisplayStatus(job);
+    return [
+      <RemixLink to={`/app/jobs/${job.id}`} key={job.id}>
+        {job.status === "COMPLETED" ? "View Results" :
+         job.status === "PROCESSING" || job.status === "QUEUED" ? "View Progress" :
+         "View Details"}
+      </RemixLink>,
+      <Badge
+        key={`status-${job.id}`}
+        tone={display.tone}
+      >
+        {display.label}
+      </Badge>,
+      `${job.processed}/${job.totalItems}`,
+      relativeTime(job.createdAt),
+    ];
+  });
 
   return (
     <Page>
@@ -450,10 +464,10 @@ export default function Dashboard() {
 
         {pendingSyncCount > 0 && recentJobId && (
           <Banner
-            title={`${pendingSyncCount} products are ready to sync!`}
+            title={`${pendingSyncCount} products are ready to apply!`}
             tone="success"
             action={{
-              content: "Review & Sync Results",
+              content: "Review & Apply Results",
               onAction: () => navigate(`/app/jobs/${recentJobId}`),
             }}
           >
@@ -541,7 +555,7 @@ export default function Dashboard() {
                     product descriptions
                   </Text>
                   <Text as="p" variant="bodyMd">
-                    3. Review suggestions and click "Sync" to update Shopify
+                    3. Review suggestions and click "Apply" to update Shopify
                   </Text>
                 </BlockStack>
               </BlockStack>
