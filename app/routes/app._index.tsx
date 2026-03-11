@@ -617,10 +617,15 @@ export default function Dashboard() {
           </BlockStack>
         </Card>
 
-        <Banner tone="info" title="Enable structured data for AI agents">
-          <p>
-            After applying scan results, go to Online Store &gt; Themes &gt; Customize &gt; App embeds &gt; toggle VisionTags Structured Data to add Product JSON-LD.
-          </p>
+        <Banner tone="info" title="Make your products visible to AI shopping agents">
+          <BlockStack gap="200">
+            <p>
+              ChatGPT Shopping, Google AI, and Perplexity recommend products based on structured data, not how your store looks. Enable Product JSON-LD to add a machine-readable product card to every product page.
+            </p>
+            <p>
+              Go to <strong>Online Store &rarr; Themes &rarr; Customize &rarr; App embeds</strong> and toggle on <strong>VisionTags Structured Data</strong>.
+            </p>
+          </BlockStack>
         </Banner>
 
         <Layout>
