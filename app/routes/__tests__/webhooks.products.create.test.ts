@@ -196,6 +196,7 @@ describe("webhooks.products.create", () => {
       mockProductPayload.image.src,
       "test-shop.myshopify.com",
       "general",
+      mockProductPayload.title,
     );
     expect(mocks.consumeCredits).toHaveBeenCalledWith("test-shop.myshopify.com", 1);
   });

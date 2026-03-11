@@ -58,6 +58,9 @@ model Product {
   suggestedDescription     String?
   suggestedSeoTitle        String?
   suggestedMetaDescription String?
+  originalDescription      String?
+  originalSeoTitle         String?
+  originalMetaDescription  String?
   syncedAt            DateTime?
   status              String    @default("PENDING")
   error               String?

@@ -388,6 +388,49 @@ export async function fetchCollectionProducts(
   }
 }
 
+interface ProductDescriptionSeoQueryResponse {
+  data?: {
+    product?: {
+      descriptionHtml: string | null;
+      seo: {
+        title: string | null;
+        description: string | null;
+      };
+    };
+  };
+}
+
+/**
+ * Fetch current description and SEO fields for a product
+ */
+export async function fetchProductDescriptionAndSeo(
+  admin: AdminApiContext,
+  productId: string,
+): Promise<{ descriptionHtml: string | null; seoTitle: string | null; metaDescription: string | null }> {
+  const response = await admin.graphql(
+    `#graphql
+    query getProductDescSeo($id: ID!) {
+      product(id: $id) {
+        descriptionHtml
+        seo {
+          title
+          description
+        }
+      }
+    }`,
+    { variables: { id: productId } }
+  );
+
+  const data = (await response.json()) as ProductDescriptionSeoQueryResponse;
+  const product = data.data?.product;
+
+  return {
+    descriptionHtml: product?.descriptionHtml ?? null,
+    seoTitle: product?.seo?.title ?? null,
+    metaDescription: product?.seo?.description ?? null,
+  };
+}
+
 interface ProductDescriptionSeoResponse {
   data?: {
     productUpdate?: {
@@ -417,6 +460,7 @@ export async function updateProductDescriptionAndSeo(
   description?: string | null,
   seoTitle?: string | null,
   metaDescription?: string | null,
+  { isHtml = false }: { isHtml?: boolean } = {},
 ): Promise<{ success: boolean; error?: string }> {
   try {
     // Skip if nothing to update
@@ -428,8 +472,8 @@ export async function updateProductDescriptionAndSeo(
     const productInput: Record<string, unknown> = { id: productId };
 
     if (description) {
-      // Wrap plain text in <p> tags for proper HTML rendering in storefront
-      productInput.descriptionHtml = `<p>${description}</p>`;
+      // isHtml: pass through as-is (for revert). Otherwise wrap plain text in <p> tags.
+      productInput.descriptionHtml = isHtml ? description : `<p>${description}</p>`;
     }
 
     const seoInput: Record<string, string> = {};

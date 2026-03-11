@@ -77,7 +77,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     // Use cached industry from shop settings, fallback to "general"
     const industryId = settings.industry || "general";
     try {
-      await queueProductAnalysis(job.id, dbProductId, productData.image.src, shop, industryId);
+      await queueProductAnalysis(job.id, dbProductId, productData.image.src, shop, industryId, productData.title);
     } catch (queueError) {
       // Queue failed - don't deduct credits, clean up the job record
       logger.error("QUEUE_ERROR", {

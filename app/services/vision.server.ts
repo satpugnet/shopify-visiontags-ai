@@ -98,9 +98,13 @@ function optimizeImageUrl(imageUrl: string): string {
  */
 export async function analyzeProductImage(
   imageUrl: string,
-  industryId?: string
+  industryId?: string,
+  productTitle?: string
 ): Promise<VisionResponse> {
-  const prompt = buildVisionPrompt(industryId || "general");
+  let prompt = buildVisionPrompt(industryId || "general");
+  if (productTitle) {
+    prompt = `Product title: "${productTitle}"\n\n${prompt}`;
+  }
 
   // Dry run mode for stress testing (skips real API call)
   if (process.env.VISION_DRY_RUN === "true") {

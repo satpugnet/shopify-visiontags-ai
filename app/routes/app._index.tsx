@@ -292,7 +292,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     try {
       await queueBulkAnalysis(
         job.id,
-        products.map((p) => ({ id: p.id, imageUrl: p.imageUrl })),
+        products.map((p) => ({ id: p.id, imageUrl: p.imageUrl, title: p.title })),
         shop,
         industryId
       );

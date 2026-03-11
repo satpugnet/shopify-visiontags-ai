@@ -102,7 +102,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     // Queue for processing - pass the DB record ID (not the Shopify GID)
     try {
-      await queueProductAnalysis(job.id, dbProductId, imageUrl, shop);
+      await queueProductAnalysis(job.id, dbProductId, imageUrl, shop, undefined, productData.title);
     } catch (queueError) {
       logger.error("QUEUE_ERROR", {
         shop,

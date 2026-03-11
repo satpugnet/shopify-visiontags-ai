@@ -36,6 +36,7 @@ export interface AnalysisJobData {
   imageUrl: string;
   shop: string;
   industryId?: string;
+  productTitle?: string;
 }
 
 // Singleton instances
@@ -81,13 +82,14 @@ export async function queueProductAnalysis(
   productId: string,
   imageUrl: string,
   shop: string,
-  industryId?: string
+  industryId?: string,
+  productTitle?: string
 ): Promise<BullJob<AnalysisJobData>> {
   const queue = getAnalysisQueue();
   const sanitizedProductId = sanitizeJobId(productId);
   return queue.add(
     `analyze-${sanitizedProductId}`,
-    { jobId, productId, imageUrl, shop, industryId },
+    { jobId, productId, imageUrl, shop, industryId, productTitle },
     {
       jobId: `${jobId}-${sanitizedProductId}`, // Unique job ID to prevent duplicates
     }
@@ -99,7 +101,7 @@ export async function queueProductAnalysis(
  */
 export async function queueBulkAnalysis(
   jobId: string,
-  products: Array<{ id: string; imageUrl: string }>,
+  products: Array<{ id: string; imageUrl: string; title?: string }>,
   shop: string,
   industryId?: string
 ): Promise<void> {
@@ -115,6 +117,7 @@ export async function queueBulkAnalysis(
         imageUrl: product.imageUrl,
         shop,
         industryId,
+        productTitle: product.title,
       },
       opts: {
         jobId: `${jobId}-${sanitizedProductId}`,
@@ -173,7 +176,7 @@ export function startAnalysisWorker(): Worker<AnalysisJobData> {
   analysisWorker = new Worker<AnalysisJobData>(
     QUEUE_NAME,
     async (job) => {
-      const { jobId, productId, imageUrl, shop, industryId } = job.data;
+      const { jobId, productId, imageUrl, shop, industryId, productTitle } = job.data;
 
       logger.info("PRODUCT_ANALYSIS_STARTED", { shop, jobId, productId, industryId });
 
@@ -202,7 +205,7 @@ export function startAnalysisWorker(): Worker<AnalysisJobData> {
           level: "info",
         });
 
-        const result = await analyzeProductImage(imageUrl, industryId);
+        const result = await analyzeProductImage(imageUrl, industryId, productTitle);
 
         // Update the product in database (wrapped in try-catch for race conditions)
         try {

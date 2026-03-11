@@ -172,8 +172,8 @@ describe("app._index action", () => {
     expect(mocks.queueBulkAnalysis).toHaveBeenCalledWith(
       "job-abc-123",
       [
-        { id: "gid://shopify/Product/1", imageUrl: "https://cdn.shopify.com/blue-shirt.jpg" },
-        { id: "gid://shopify/Product/2", imageUrl: "https://cdn.shopify.com/red-sneakers.jpg" },
+        { id: "gid://shopify/Product/1", imageUrl: "https://cdn.shopify.com/blue-shirt.jpg", title: "Blue T-Shirt" },
+        { id: "gid://shopify/Product/2", imageUrl: "https://cdn.shopify.com/red-sneakers.jpg", title: "Red Sneakers" },
       ],
       "test.myshopify.com",
       "general",

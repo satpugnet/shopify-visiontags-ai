@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   updateProductTags: vi.fn(),
   updateProductImageAlt: vi.fn(),
   updateProductDescriptionAndSeo: vi.fn(),
+  fetchProductDescriptionAndSeo: vi.fn(),
 }));
 
 // Mock modules
@@ -38,6 +39,7 @@ vi.mock("../../services/products.server", () => ({
   updateProductTags: mocks.updateProductTags,
   updateProductImageAlt: mocks.updateProductImageAlt,
   updateProductDescriptionAndSeo: mocks.updateProductDescriptionAndSeo,
+  fetchProductDescriptionAndSeo: mocks.fetchProductDescriptionAndSeo,
 }));
 
 // Import after mocking
@@ -99,6 +101,12 @@ beforeEach(() => {
   mocks.authenticate.admin.mockResolvedValue({
     admin: mockAdmin,
     session: mockSession,
+  });
+  // Default: fetchProductDescriptionAndSeo returns empty originals
+  mocks.fetchProductDescriptionAndSeo.mockResolvedValue({
+    descriptionHtml: null,
+    seoTitle: null,
+    metaDescription: null,
   });
 });
 
