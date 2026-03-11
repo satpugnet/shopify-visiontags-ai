@@ -50,13 +50,39 @@ export const mockVisionResult = {
     color: "Navy Blue",
     pattern: "Solid",
     material: "Cotton",
+    product_type: "T-Shirt",
+  } as Record<string, string>,
+  tags: ["Navy Blue", "Cotton", "Summer Vibes", "Business Casual"],
+  alt_text: "A navy blue cotton t-shirt",
+  description: "A classic navy blue cotton t-shirt with a clean solid pattern.",
+  seo_title: "Navy Blue Cotton T-Shirt",
+  meta_description: "Shop this classic navy blue cotton t-shirt.",
+};
+
+export const mockFashionVisionResult = {
+  metafields: {
+    color: "Navy Blue",
+    pattern: "Solid",
+    material: "Cotton",
     target_gender: "Male",
     age_group: "Adult",
     neckline: "Crew",
     sleeve_length: "Short",
     fit: "Regular",
-  },
+    product_type: "T-Shirt",
+  } as Record<string, string>,
   tags: ["Navy Blue", "Cotton", "Summer Vibes", "Business Casual"],
+};
+
+export const mockElectronicsVisionResult = {
+  metafields: {
+    color: "Black",
+    material: "Plastic",
+    connectivity: "Bluetooth",
+    power_source: "Battery",
+    product_type: "Headphones",
+  } as Record<string, string>,
+  tags: ["Wireless", "Bluetooth", "Music", "Audio"],
 };
 
 export const mockVisionResultWithMarkdown = `\`\`\`json

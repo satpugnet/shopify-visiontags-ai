@@ -7,6 +7,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import * as Sentry from "@sentry/remix";
 import { logger } from "./logger.server";
 import { withRetry } from "./retry.server";
+import { buildVisionPrompt } from "./industry.server";
 
 // Initialize Anthropic client via OpenRouter's Anthropic Skin
 const anthropic = new Anthropic({
@@ -18,60 +19,8 @@ const anthropic = new Anthropic({
   },
 });
 
-// The AI prompt for hybrid metafields + tags + alt text output
-const VISION_PROMPT = `Analyze this product image for an e-commerce store.
-Return a JSON object with THREE sections:
-
-{
-  "metafields": {
-    // Strict, objective data for Shopify Standard Taxonomy filters
-    // Only include keys where you can make a confident visual assessment
-    "target_gender": "Female" | "Male" | "Unisex",
-    "age_group": "Adult" | "Teen" | "Kids" | "Baby",
-    "color": "Primary color name (e.g., Navy Blue)",
-    "color_hex": "#XXXXXX (hex code for the primary color)",
-    "pattern": "Solid" | "Striped" | "Floral" | "Plaid" | "Paisley" | "Animal Print" | "Geometric" | "Abstract",
-    "material": "Cotton" | "Polyester" | "Silk" | "Wool" | "Denim" | "Leather" | "Linen" | "Synthetic",
-    "neckline": "Crew" | "V-neck" | "Scoop" | "Boat" | "Turtleneck" | "Off-shoulder" | "Halter" | "Collared" | null,
-    "sleeve_length": "Sleeveless" | "Short" | "3/4" | "Long" | null,
-    "fit": "Slim" | "Regular" | "Relaxed" | "Oversized",
-    "product_type": "Suggested Shopify product type (e.g., T-Shirt, Dress, Pants, Jacket, Bag, Shoes)"
-  },
-  "tags": [
-    // SEO keywords and vibe/occasion strings (Title Case)
-    // Include: color, pattern, material as keywords
-    // Add: 3-5 descriptive vibe/occasion words
-    // Examples: "Navy Blue", "Striped", "Cotton", "Summer Vibes", "Business Casual", "Resort Wear"
-  ],
-  "alt_text": "Descriptive alt text for accessibility and SEO, max 125 characters. Describe what the product looks like.",
-  "description": "2-4 sentence product description for the storefront. Describe what the product looks like based on the image. Include key attributes (color, material, style) naturally. Write in a professional e-commerce tone. Plain text only, no HTML.",
-  "seo_title": "SEO page title, max 60 characters. Format: [Key Attribute] [Product Type]. Example: 'Navy Blue Cotton Crew Neck T-Shirt'",
-  "meta_description": "Meta description for search results, max 155 characters. Compelling summary with key product attributes. Include a subtle call to action."
-}
-
-IMPORTANT RULES:
-1. Only include metafield keys where you can make a confident visual assessment
-2. If the product is not apparel (e.g., accessories, home goods), omit clothing-specific fields like neckline, sleeve_length
-3. Tags should be Title Case and include both factual (color, material) and vibe/mood keywords
-4. alt_text should be descriptive and accessibility-friendly, describing the product visually
-5. Return valid JSON only - no markdown, no explanation
-6. description should be plain text (no HTML, no markdown). seo_title max 60 chars. meta_description max 155 chars.
-
-Return valid JSON only.`;
-
 export interface VisionResult {
-  metafields: {
-    target_gender?: string;
-    age_group?: string;
-    color?: string;
-    color_hex?: string;
-    pattern?: string;
-    material?: string;
-    neckline?: string | null;
-    sleeve_length?: string | null;
-    fit?: string;
-    product_type?: string;
-  };
+  metafields: Record<string, string | null>;
   tags: string[];
   alt_text?: string;
   description?: string;
@@ -148,13 +97,16 @@ function optimizeImageUrl(imageUrl: string): string {
  * Includes retry logic for rate limits and transient errors
  */
 export async function analyzeProductImage(
-  imageUrl: string
+  imageUrl: string,
+  industryId?: string
 ): Promise<VisionResponse> {
+  const prompt = buildVisionPrompt(industryId || "general");
+
   // Dry run mode for stress testing (skips real API call)
   if (process.env.VISION_DRY_RUN === "true") {
     await new Promise((r) => setTimeout(r, 200));
     return {
-      metafields: { color: "Test Blue", material: "Cotton", pattern: "Solid", product_type: "T-Shirt" },
+      metafields: { color: "Test Blue", material: "Cotton", product_type: "T-Shirt" },
       tags: ["Test", "Dry Run", "Stress Test"],
       alt_text: "Dry run test image",
       description: "This is a dry run test product description.",
@@ -186,7 +138,7 @@ export async function analyzeProductImage(
                 },
                 {
                   type: "text",
-                  text: VISION_PROMPT,
+                  text: prompt,
                 },
               ],
             },
@@ -271,12 +223,13 @@ export function isVisionError(response: VisionResponse): response is VisionError
  * Processes sequentially to respect rate limits
  */
 export async function analyzeProductImages(
-  imageUrls: string[]
+  imageUrls: string[],
+  industryId?: string
 ): Promise<Map<string, VisionResponse>> {
   const results = new Map<string, VisionResponse>();
 
   for (const url of imageUrls) {
-    const result = await analyzeProductImage(url);
+    const result = await analyzeProductImage(url, industryId);
     results.set(url, result);
 
     // Small delay between requests to avoid rate limiting

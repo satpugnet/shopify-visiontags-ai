@@ -129,7 +129,6 @@ describe("app.jobs.$id action", () => {
       mockAdmin,
       "gid://shopify/Product/1",
       { color: "blue", material: "cotton" },
-      "Apparel",
     );
     expect(mocks.updateProductTags).not.toHaveBeenCalled();
     expect(mocks.updateProductImageAlt).not.toHaveBeenCalled();
@@ -230,7 +229,6 @@ describe("app.jobs.$id action", () => {
       mockAdmin,
       "gid://shopify/Product/1",
       { color: "navy blue", material: "cotton", style: "casual" },
-      "Apparel",
     );
     // Tags should use the edited version entirely
     expect(mocks.updateProductTags).toHaveBeenCalledWith(

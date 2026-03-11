@@ -25,6 +25,7 @@ export interface ProductWithImage {
   title: string;
   imageUrl: string;
   category?: string;
+  productType?: string;
   tags: string[];
 }
 
@@ -156,6 +157,7 @@ export async function fetchAllProducts(
             title: product.title,
             imageUrl: product.featuredImage.url,
             category: product.category?.name || product.productType,
+            productType: product.productType,
             tags: product.tags,
           });
         }
@@ -369,6 +371,7 @@ export async function fetchCollectionProducts(
             title: product.title,
             imageUrl: product.featuredImage.url,
             category: product.category?.name || product.productType,
+            productType: product.productType,
             tags: product.tags,
           });
         }

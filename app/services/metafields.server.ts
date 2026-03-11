@@ -5,37 +5,7 @@
 
 import type { AdminApiContext } from "@shopify/shopify-app-remix/server";
 import { logger } from "./logger.server";
-
-// Custom metafield mappings for VisionTags
-// Note: "shopify" namespace is reserved - we use "custom" for all app metafields
-const METAFIELD_MAPPINGS: Record<string, { namespace: string; key: string; type: string }> = {
-  color: { namespace: "custom", key: "color", type: "single_line_text_field" },
-  color_hex: { namespace: "custom", key: "color_hex", type: "single_line_text_field" },
-  pattern: { namespace: "custom", key: "pattern", type: "single_line_text_field" },
-  material: { namespace: "custom", key: "material", type: "single_line_text_field" },
-  target_gender: { namespace: "custom", key: "target_gender", type: "single_line_text_field" },
-  age_group: { namespace: "custom", key: "age_group", type: "single_line_text_field" },
-  neckline: { namespace: "custom", key: "neckline", type: "single_line_text_field" },
-  sleeve_length: { namespace: "custom", key: "sleeve_length", type: "single_line_text_field" },
-  fit: { namespace: "custom", key: "fit", type: "single_line_text_field" },
-  product_type: { namespace: "custom", key: "product_type", type: "single_line_text_field" },
-};
-
-// Product categories that support apparel-specific fields
-const APPAREL_CATEGORIES = [
-  "Apparel",
-  "Clothing",
-  "Shirts",
-  "Tops",
-  "Dresses",
-  "Pants",
-  "Shorts",
-  "Skirts",
-  "Outerwear",
-  "Jackets",
-  "Coats",
-  "Sweaters",
-];
+import { getMetafieldMappings } from "./industry.server";
 
 export interface MetafieldInput {
   namespace: string;
@@ -44,55 +14,21 @@ export interface MetafieldInput {
   type: string;
 }
 
-export interface ProductMetafields {
-  color?: string;
-  pattern?: string;
-  material?: string;
-  target_gender?: string;
-  age_group?: string;
-  neckline?: string | null;
-  sleeve_length?: string | null;
-  fit?: string;
-}
-
 /**
- * Filter metafields based on product category
- * V1: Basic filtering - skip apparel-specific fields for non-apparel
+ * Convert AI metafields to Shopify metafield inputs.
+ * Uses industry-specific mappings to validate keys -- unknown keys are skipped.
  */
-export function filterMetafieldsByCategory(
-  metafields: ProductMetafields,
-  category?: string | null
-): ProductMetafields {
-  const filtered = { ...metafields };
-
-  // If category is known and NOT apparel, remove apparel-specific fields
-  if (category && !APPAREL_CATEGORIES.some((cat) => category.toLowerCase().includes(cat.toLowerCase()))) {
-    delete filtered.neckline;
-    delete filtered.sleeve_length;
-    delete filtered.fit;
-  }
-
-  // Remove null values
-  Object.keys(filtered).forEach((key) => {
-    const k = key as keyof ProductMetafields;
-    if (filtered[k] === null || filtered[k] === undefined) {
-      delete filtered[k];
-    }
-  });
-
-  return filtered;
-}
-
-/**
- * Convert AI metafields to Shopify metafield inputs
- */
-export function toMetafieldInputs(metafields: ProductMetafields): MetafieldInput[] {
+export function toMetafieldInputs(
+  metafields: Record<string, string | null | undefined>,
+  industryId?: string
+): MetafieldInput[] {
+  const mappings = getMetafieldMappings(industryId || "general");
   const inputs: MetafieldInput[] = [];
 
   for (const [key, value] of Object.entries(metafields)) {
     if (value === null || value === undefined) continue;
 
-    const mapping = METAFIELD_MAPPINGS[key];
+    const mapping = mappings[key];
     if (!mapping) continue;
 
     inputs.push({
@@ -113,13 +49,11 @@ export function toMetafieldInputs(metafields: ProductMetafields): MetafieldInput
 export async function updateProductMetafields(
   admin: AdminApiContext,
   productId: string,
-  metafields: ProductMetafields,
-  category?: string | null
+  metafields: Record<string, string | null | undefined>,
+  industryId?: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    // Filter metafields based on category
-    const filtered = filterMetafieldsByCategory(metafields, category);
-    const inputs = toMetafieldInputs(filtered);
+    const inputs = toMetafieldInputs(metafields, industryId);
 
     if (inputs.length === 0) {
       logger.info("METAFIELD_SYNC_SKIP", { productId, reason: "no_metafields" });
@@ -129,7 +63,6 @@ export async function updateProductMetafields(
     logger.info("METAFIELD_SYNC_START", { productId, count: inputs.length });
 
     // Use metafieldsSet mutation for reliable metafield updates
-    // This mutation is specifically designed for setting metafields
     const metafieldsInput = inputs.map((input) => ({
       namespace: input.namespace,
       key: input.key,

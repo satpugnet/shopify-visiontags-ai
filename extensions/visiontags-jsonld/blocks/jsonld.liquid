@@ -1,0 +1,25 @@
+{% if template.name == 'product' %}
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "Product",
+  "name": {{ product.title | json }},
+  "description": {{ product.description | strip_html | truncate: 500 | json }},
+  "image": {{ product.featured_image | image_url: width: 1200 | json }},
+  "url": {{ canonical_url | json }},
+  "brand": {
+    "@type": "Brand",
+    "name": {{ shop.name | json }}
+  }
+  {% if product.metafields.custom.color %}, "color": {{ product.metafields.custom.color.value | json }}{% endif %}
+  {% if product.metafields.custom.material %}, "material": {{ product.metafields.custom.material.value | json }}{% endif %}
+  , "offers": {
+    "@type": "Offer",
+    "url": {{ canonical_url | json }},
+    "priceCurrency": {{ cart.currency.iso_code | json }},
+    "price": "{{ product.price | divided_by: 100.0 }}",
+    "availability": "https://schema.org/{% if product.available %}InStock{% else %}OutOfStock{% endif %}"
+  }
+}
+</script>
+{% endif %}

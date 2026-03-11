@@ -28,6 +28,8 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { logger } from "../services/logger.server";
 
+const SYNC_BATCH_SIZE = 50;
+
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const shop = session.shop;
@@ -102,7 +104,14 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     const syncAltText = formData.get("syncAltText") === "true";
     const syncDescription = formData.get("syncDescription") === "true";
     const editsJson = formData.get("edits") as string;
-    let edits: Record<string, unknown> = {};
+    let edits: Record<string, {
+      metafields?: Record<string, string>;
+      tags?: string[];
+      alt_text?: string;
+      description?: string;
+      seo_title?: string;
+      meta_description?: string;
+    }> = {};
     if (editsJson) {
       try {
         edits = JSON.parse(editsJson);
@@ -165,8 +174,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         const result = await updateProductMetafields(
           admin,
           productId,
-          metafieldsWithoutAlt,
-          product.currentCategory
+          metafieldsWithoutAlt
         );
         metaSuccess = result.success;
         metaError = result.error;
@@ -248,8 +256,8 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     }
 
     const message = errors > 0 && errorMessages.length > 0
-      ? `Synced ${synced} products, ${errors} failed: ${errorMessages[0]}`
-      : `Synced ${synced} products${errors > 0 ? `, ${errors} failed` : ""}`;
+      ? `Applied ${synced} products, ${errors} failed: ${errorMessages[0]}`
+      : `Applied ${synced} products${errors > 0 ? `, ${errors} failed` : ""}`;
 
     logger.info("SYNC_COMPLETE", { shop, jobId: id, synced, errors, errorCount: errorMessages.length });
 
@@ -285,6 +293,7 @@ type ActionData = {
   success: boolean;
   message?: string;
   error?: string;
+  synced?: number;
 };
 
 function jobDisplayStatus(job: { status: string; totalItems: number; syncedCount: number }) {
@@ -311,6 +320,7 @@ export default function JobDetail() {
   const shopify = useAppBridge();
   const revalidator = useRevalidator();
 
+  const [showReview, setShowReview] = useState(false);
   const [syncMetafields, setSyncMetafields] = useState(true);
   const [syncTags, setSyncTags] = useState(true);
   const [syncAltText, setSyncAltText] = useState(true);
@@ -328,126 +338,52 @@ export default function JobDetail() {
     meta_description?: string;
   }>>({});
 
-  // Helper to get current metafield value (edited or original)
-  const getMetafieldValue = (productId: string, key: string, original: string | undefined) => {
-    return edits[productId]?.metafields?.[key] ?? original ?? "";
-  };
+  // Helpers for edits
+  const getMetafieldValue = (productId: string, key: string, original: string | undefined) =>
+    edits[productId]?.metafields?.[key] ?? original ?? "";
+  const getTags = (productId: string, original: string[] | null): string[] =>
+    edits[productId]?.tags ?? original ?? [];
+  const getAltText = (productId: string, original: string | undefined): string =>
+    edits[productId]?.alt_text ?? original ?? "";
+  const getDescription = (productId: string, original: string | null | undefined): string =>
+    edits[productId]?.description ?? original ?? "";
+  const getSeoTitle = (productId: string, original: string | null | undefined): string =>
+    edits[productId]?.seo_title ?? original ?? "";
+  const getMetaDescription = (productId: string, original: string | null | undefined): string =>
+    edits[productId]?.meta_description ?? original ?? "";
 
-  // Helper to get current tags (edited or original)
-  const getTags = (productId: string, original: string[] | null): string[] => {
-    return edits[productId]?.tags ?? original ?? [];
-  };
-
-  // Helper to get alt text (edited or original)
-  const getAltText = (productId: string, original: string | undefined): string => {
-    return edits[productId]?.alt_text ?? original ?? "";
-  };
-
-  // Helper to get description (edited or original)
-  const getDescription = (productId: string, original: string | null | undefined): string => {
-    return edits[productId]?.description ?? original ?? "";
-  };
-
-  // Helper to get SEO title (edited or original)
-  const getSeoTitle = (productId: string, original: string | null | undefined): string => {
-    return edits[productId]?.seo_title ?? original ?? "";
-  };
-
-  // Helper to get meta description (edited or original)
-  const getMetaDescription = (productId: string, original: string | null | undefined): string => {
-    return edits[productId]?.meta_description ?? original ?? "";
-  };
-
-  // Update a metafield edit
   const updateMetafieldEdit = (productId: string, key: string, value: string) => {
-    setEdits(prev => ({
-      ...prev,
-      [productId]: {
-        ...prev[productId],
-        metafields: {
-          ...prev[productId]?.metafields,
-          [key]: value,
-        },
-      },
-    }));
+    setEdits(prev => ({ ...prev, [productId]: { ...prev[productId], metafields: { ...prev[productId]?.metafields, [key]: value } } }));
   };
-
-  // Update alt text edit
   const updateAltTextEdit = (productId: string, value: string) => {
-    setEdits(prev => ({
-      ...prev,
-      [productId]: {
-        ...prev[productId],
-        alt_text: value,
-      },
-    }));
+    setEdits(prev => ({ ...prev, [productId]: { ...prev[productId], alt_text: value } }));
   };
-
-  // Update description edit
   const updateDescriptionEdit = (productId: string, value: string) => {
-    setEdits(prev => ({
-      ...prev,
-      [productId]: {
-        ...prev[productId],
-        description: value,
-      },
-    }));
+    setEdits(prev => ({ ...prev, [productId]: { ...prev[productId], description: value } }));
   };
-
-  // Update SEO title edit
   const updateSeoTitleEdit = (productId: string, value: string) => {
-    setEdits(prev => ({
-      ...prev,
-      [productId]: {
-        ...prev[productId],
-        seo_title: value,
-      },
-    }));
+    setEdits(prev => ({ ...prev, [productId]: { ...prev[productId], seo_title: value } }));
   };
-
-  // Update meta description edit
   const updateMetaDescriptionEdit = (productId: string, value: string) => {
-    setEdits(prev => ({
-      ...prev,
-      [productId]: {
-        ...prev[productId],
-        meta_description: value,
-      },
-    }));
+    setEdits(prev => ({ ...prev, [productId]: { ...prev[productId], meta_description: value } }));
   };
 
-  // Add a tag
   const addTag = (productId: string, product: typeof products[0]) => {
     const newTag = newTagInputs[productId]?.trim();
     if (!newTag) return;
-
     const currentTags = getTags(productId, product.suggestedTags);
     if (currentTags.includes(newTag)) return;
-
-    setEdits(prev => ({
-      ...prev,
-      [productId]: {
-        ...prev[productId],
-        tags: [...currentTags, newTag],
-      },
-    }));
+    setEdits(prev => ({ ...prev, [productId]: { ...prev[productId], tags: [...currentTags, newTag] } }));
     setNewTagInputs(prev => ({ ...prev, [productId]: "" }));
   };
 
-  // Remove a tag
   const removeTag = (productId: string, tagIndex: number, product: typeof products[0]) => {
     const currentTags = getTags(productId, product.suggestedTags);
-    const newTags = currentTags.filter((_, idx) => idx !== tagIndex);
-    setEdits(prev => ({
-      ...prev,
-      [productId]: {
-        ...prev[productId],
-        tags: newTags,
-      },
-    }));
+    setEdits(prev => ({ ...prev, [productId]: { ...prev[productId], tags: currentTags.filter((_, idx) => idx !== tagIndex) } }));
   };
 
   const analyzedProducts = products.filter((p) => p.status === "ANALYZED");
+  const syncedProducts = products.filter((p) => p.status === "SYNCED");
   const resourceName = { singular: "product", plural: "products" };
 
   const { selectedResources, allResourcesSelected, handleSelectionChange } =
@@ -455,29 +391,41 @@ export default function JobDetail() {
 
   const isSyncing = fetcher.state === "submitting";
   const isProcessing = job.status === "QUEUED" || job.status === "PROCESSING";
+  const allSynced = job.syncedCount >= job.totalItems && job.status === "COMPLETED";
 
   // Auto-refresh while job is processing
   useEffect(() => {
     if (!isProcessing) return;
-
     const interval = setInterval(() => {
-      if (revalidator.state === "idle") {
-        revalidator.revalidate();
-      }
-    }, 3000); // Refresh every 3 seconds
-
+      if (revalidator.state === "idle") revalidator.revalidate();
+    }, 3000);
     return () => clearInterval(interval);
   }, [isProcessing, revalidator]);
 
+  // Auto-chain batch sync: after a batch completes, submit next batch if there are still ANALYZED products
   useEffect(() => {
-    if (fetcher.data?.success && fetcher.data?.message) {
-      shopify.toast.show(fetcher.data.message);
+    if (fetcher.data?.success && fetcher.data?.synced && fetcher.data.synced > 0) {
+      shopify.toast.show(fetcher.data.message || "Applied successfully");
     } else if (fetcher.data?.error) {
       shopify.toast.show(fetcher.data.error, { isError: true });
     }
   }, [fetcher.data, shopify]);
 
-  const handleSync = () => {
+  const submitApplyAll = useCallback(() => {
+    const batch = analyzedProducts.slice(0, SYNC_BATCH_SIZE);
+    if (batch.length === 0) return;
+    const formData = new FormData();
+    formData.append("action", "sync");
+    formData.append("syncMetafields", "true");
+    formData.append("syncTags", "true");
+    formData.append("syncAltText", "true");
+    formData.append("syncDescription", "true");
+    formData.append("edits", JSON.stringify(edits));
+    batch.forEach((p) => formData.append("productIds", p.id));
+    fetcher.submit(formData, { method: "POST" });
+  }, [analyzedProducts, edits, fetcher]);
+
+  const handleSyncSelected = () => {
     const formData = new FormData();
     formData.append("action", "sync");
     formData.append("syncMetafields", String(syncMetafields));
@@ -492,11 +440,8 @@ export default function JobDetail() {
   const toggleRow = useCallback((id: string) => {
     setExpandedRows((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
   }, []);
@@ -516,21 +461,13 @@ export default function JobDetail() {
         disabled={!isAnalyzed}
       >
         <IndexTable.Cell>
-          <Thumbnail
-            source={product.imageUrl}
-            alt={product.title}
-            size="small"
-          />
+          <Thumbnail source={product.imageUrl} alt={product.title} size="small" />
         </IndexTable.Cell>
         <IndexTable.Cell>
           <BlockStack gap="100">
-            <Text variant="bodyMd" fontWeight="semibold" as="span">
-              {product.title}
-            </Text>
+            <Text variant="bodyMd" fontWeight="semibold" as="span">{product.title}</Text>
             {product.currentCategory && (
-              <Text variant="bodySm" tone="subdued" as="span">
-                {product.currentCategory}
-              </Text>
+              <Text variant="bodySm" tone="subdued" as="span">{product.currentCategory}</Text>
             )}
           </BlockStack>
         </IndexTable.Cell>
@@ -541,18 +478,12 @@ export default function JobDetail() {
         </IndexTable.Cell>
         <IndexTable.Cell>
           {isAnalyzed && (
-            <Button
-              variant="plain"
-              onClick={() => toggleRow(product.id)}
-              ariaExpanded={isExpanded}
-            >
+            <Button variant="plain" onClick={() => toggleRow(product.id)} ariaExpanded={isExpanded}>
               {isExpanded ? "Hide details" : "Show details"}
             </Button>
           )}
           {product.error && (
-            <Text as="span" tone="critical" variant="bodySm">
-              {product.error}
-            </Text>
+            <Text as="span" tone="critical" variant="bodySm">{product.error}</Text>
           )}
         </IndexTable.Cell>
       </IndexTable.Row>
@@ -569,314 +500,262 @@ export default function JobDetail() {
 
       <Box paddingBlockEnd="800">
         <BlockStack gap="500">
-          {/* Job Status Card */}
-        <Card>
-          <BlockStack gap="400">
-            <InlineStack align="space-between">
-              <Text as="h2" variant="headingMd">
-                Scan Status
-              </Text>
-              <Badge tone={jobDisplayStatus(job).tone}>
-                {jobDisplayStatus(job).label}
-              </Badge>
-            </InlineStack>
+          {/* Progress card while processing */}
+          {isProcessing && (
+            <Card>
+              <BlockStack gap="400">
+                <InlineStack align="space-between">
+                  <Text as="h2" variant="headingMd">Scan Status</Text>
+                  <Badge tone="info">Scanning...</Badge>
+                </InlineStack>
+                <BlockStack gap="200">
+                  <InlineStack align="space-between">
+                    <Text as="span" variant="bodyMd">Progress</Text>
+                    <Text as="span" variant="bodyMd">{job.processed} / {job.totalItems} products</Text>
+                  </InlineStack>
+                  <ProgressBar progress={progress} size="small" />
+                </BlockStack>
+              </BlockStack>
+            </Card>
+          )}
 
-            <BlockStack gap="200">
-              <InlineStack align="space-between">
-                <Text as="span" variant="bodyMd">
-                  Progress
-                </Text>
-                <Text as="span" variant="bodyMd">
-                  {job.processed} / {job.totalItems} products
-                </Text>
-              </InlineStack>
-              <ProgressBar progress={progress} size="small" />
-            </BlockStack>
-          </BlockStack>
-        </Card>
+          {/* Hero Apply Banner - shown when scan is complete with ANALYZED products */}
+          {!isProcessing && analyzedProducts.length > 0 && (
+            <Banner title={`Scan Complete! ${analyzedProducts.length} products analyzed successfully.`} tone="success">
+              <BlockStack gap="300">
+                <p>All suggestions are ready. Apply them to your Shopify store with one click.</p>
+                <InlineStack gap="300">
+                  <Button variant="primary" onClick={submitApplyAll} loading={isSyncing}>
+                    {isSyncing ? `Applying...` : `Apply All to Shopify`}
+                  </Button>
+                  <Button variant="plain" onClick={() => setShowReview(!showReview)}>
+                    {showReview ? "Hide review" : "Review suggestions first"}
+                  </Button>
+                </InlineStack>
+              </BlockStack>
+            </Banner>
+          )}
 
-        {/* Error Summary */}
-        {products.filter((p) => p.status === "ERROR").length > 0 && (
-          <Banner
-            title={`${products.filter((p) => p.status === "ERROR").length} product(s) failed to scan`}
-            tone="critical"
-          >
-            <BlockStack gap="100">
-              {products
-                .filter((p) => p.status === "ERROR")
-                .slice(0, 3)
-                .map((p) => (
-                  <Text as="p" variant="bodySm" key={p.id}>
-                    {p.title}: {p.error || "Unknown error"}
-                  </Text>
-                ))}
-              {products.filter((p) => p.status === "ERROR").length > 3 && (
-                <Text as="p" variant="bodySm" tone="subdued">
-                  And {products.filter((p) => p.status === "ERROR").length - 3}{" "}
-                  more...
-                </Text>
-              )}
-            </BlockStack>
-          </Banner>
-        )}
+          {/* All synced banner */}
+          {allSynced && (
+            <Banner title={`All ${job.totalItems} products applied to Shopify`} tone="success">
+              <p>Your products are now enriched with AI-generated data.</p>
+            </Banner>
+          )}
 
-        {/* Sync Guide */}
-        {analyzedProducts.length > 0 && (
-          <Banner
-            title="Your AI suggestions are ready to apply"
-            tone="info"
-          >
-            <List type="number">
-              <List.Item>Click "Show details" on any product to review or edit suggestions</List.Item>
-              <List.Item>Click "Apply All" to update your Shopify products, or select specific ones first</List.Item>
-            </List>
-          </Banner>
-        )}
-
-        {/* Apply to Shopify */}
-        {analyzedProducts.length > 0 && (
-          <Card>
-            <BlockStack gap="400">
+          {/* Error Summary */}
+          {products.filter((p) => p.status === "ERROR").length > 0 && (
+            <Banner
+              title={`${products.filter((p) => p.status === "ERROR").length} product(s) failed to scan`}
+              tone="critical"
+            >
               <BlockStack gap="100">
-                <Text as="h2" variant="headingMd">
-                  Apply to Shopify
-                </Text>
+                {products
+                  .filter((p) => p.status === "ERROR")
+                  .slice(0, 3)
+                  .map((p) => (
+                    <Text as="p" variant="bodySm" key={p.id}>
+                      {p.title}: {p.error || "Unknown error"}
+                    </Text>
+                  ))}
+                {products.filter((p) => p.status === "ERROR").length > 3 && (
+                  <Text as="p" variant="bodySm" tone="subdued">
+                    And {products.filter((p) => p.status === "ERROR").length - 3} more...
+                  </Text>
+                )}
+              </BlockStack>
+            </Banner>
+          )}
+
+          {/* Sync progress bar during apply */}
+          {isSyncing && syncedProducts.length > 0 && (
+            <Card>
+              <BlockStack gap="200">
+                <Text as="h2" variant="headingMd">Applying to Shopify...</Text>
+                <ProgressBar
+                  progress={Math.round((syncedProducts.length / job.totalItems) * 100)}
+                  size="small"
+                />
                 <Text as="p" variant="bodySm" tone="subdued">
-                  Choose which data to apply to your products.
+                  {syncedProducts.length}/{job.totalItems} products applied
                 </Text>
               </BlockStack>
+            </Card>
+          )}
 
-              <InlineStack gap="400" wrap>
-                <Checkbox
-                  label="Metafields (color, material, pattern, etc.)"
-                  checked={syncMetafields}
-                  onChange={setSyncMetafields}
-                />
-                <Checkbox
-                  label="Tags (SEO + vibe keywords)"
-                  checked={syncTags}
-                  onChange={setSyncTags}
-                />
-                <Checkbox
-                  label="Alt Text (image accessibility)"
-                  checked={syncAltText}
-                  onChange={setSyncAltText}
-                />
-                <Checkbox
-                  label="Description & SEO (product description, page title, meta description)"
-                  checked={syncDescription}
-                  onChange={setSyncDescription}
-                />
-              </InlineStack>
-
-              <InlineStack gap="300">
-                <Button
-                  variant="primary"
-                  onClick={() => {
-                    const formData = new FormData();
-                    formData.append("action", "sync");
-                    formData.append("syncMetafields", String(syncMetafields));
-                    formData.append("syncTags", String(syncTags));
-                    formData.append("syncAltText", String(syncAltText));
-                    formData.append("syncDescription", String(syncDescription));
-                    formData.append("edits", JSON.stringify(edits));
-                    analyzedProducts.forEach((p) => formData.append("productIds", p.id));
-                    fetcher.submit(formData, { method: "POST" });
-                  }}
-                  loading={isSyncing}
-                  disabled={
-                    analyzedProducts.length === 0 ||
-                    (!syncMetafields && !syncTags && !syncAltText && !syncDescription)
-                  }
-                >
-                  {`Apply All ${analyzedProducts.length} Products to Shopify`}
-                </Button>
-                {selectedResources.length > 0 && selectedResources.length < analyzedProducts.length && (
-                  <Button
-                    onClick={handleSync}
-                    loading={isSyncing}
-                  >
-                    {`Apply ${selectedResources.length} Selected Only`}
-                  </Button>
-                )}
-              </InlineStack>
-            </BlockStack>
-          </Card>
-        )}
-
-        {/* Products Table */}
-        <Card padding="0">
-          <IndexTable
-            resourceName={resourceName}
-            itemCount={products.length}
-            selectedItemsCount={
-              allResourcesSelected ? "All" : selectedResources.length
-            }
-            onSelectionChange={handleSelectionChange}
-            headings={[
-              { title: "Image" },
-              { title: "Product" },
-              { title: "Status" },
-              { title: "Details" },
-            ]}
-            selectable={analyzedProducts.length > 0}
-          >
-            {rowMarkup}
-          </IndexTable>
-        </Card>
-
-        {/* Expanded Details */}
-        {products.map((product) => {
-          if (!expandedRows.has(product.id) || product.status !== "ANALYZED") {
-            return null;
-          }
-
-          return (
-            <Card key={`detail-${product.id}`}>
-              <BlockStack gap="400">
-                <Text as="h3" variant="headingMd">
-                  {product.title} - AI Suggestions
-                </Text>
-
-                <Layout>
-                  <Layout.Section variant="oneHalf">
-                    <BlockStack gap="300">
-                      <Text as="h4" variant="headingSm">
-                        Suggested Metafields
-                      </Text>
-                      {product.suggestedMetafields ? (
-                        <BlockStack gap="200">
-                          {Object.entries(product.suggestedMetafields)
-                            .filter(([key]) => key !== "alt_text")
-                            .map(([key, value]) => (
-                              <TextField
-                                key={key}
-                                label={key.replace(/_/g, " ")}
-                                value={getMetafieldValue(product.id, key, value)}
-                                onChange={(newValue) => updateMetafieldEdit(product.id, key, newValue)}
-                                autoComplete="off"
-                                size="slim"
-                              />
-                            ))}
-                        </BlockStack>
-                      ) : (
-                        <Text as="p" variant="bodySm" tone="subdued">
-                          No metafields suggested
-                        </Text>
-                      )}
-
-                      {(product.suggestedMetafields?.alt_text || edits[product.id]?.alt_text) && (
-                        <BlockStack gap="200">
-                          <Divider />
-                          <TextField
-                            label="Alt Text"
-                            value={getAltText(product.id, product.suggestedMetafields?.alt_text)}
-                            onChange={(newValue) => updateAltTextEdit(product.id, newValue)}
-                            autoComplete="off"
-                            multiline={2}
-                            helpText="Max 125 characters for accessibility"
-                          />
-                        </BlockStack>
-                      )}
+          {/* Review UI - hidden by default, shown when "Review suggestions first" is clicked */}
+          {showReview && (
+            <>
+              {/* Sync Options */}
+              {analyzedProducts.length > 0 && (
+                <Card>
+                  <BlockStack gap="400">
+                    <BlockStack gap="100">
+                      <Text as="h2" variant="headingMd">Apply Options</Text>
+                      <Text as="p" variant="bodySm" tone="subdued">Choose which data to apply.</Text>
                     </BlockStack>
-                  </Layout.Section>
 
-                  <Layout.Section variant="oneHalf">
-                    <BlockStack gap="300">
-                      <Text as="h4" variant="headingSm">
-                        Suggested Tags
-                      </Text>
-                      <InlineStack gap="100" wrap>
-                        {getTags(product.id, product.suggestedTags).map((tag, i) => (
-                          <Tag
-                            key={i}
-                            onRemove={() => removeTag(product.id, i, product)}
-                          >
-                            {tag}
-                          </Tag>
-                        ))}
-                      </InlineStack>
+                    <InlineStack gap="400" wrap>
+                      <Checkbox label="Metafields" checked={syncMetafields} onChange={setSyncMetafields} />
+                      <Checkbox label="Tags" checked={syncTags} onChange={setSyncTags} />
+                      <Checkbox label="Alt Text" checked={syncAltText} onChange={setSyncAltText} />
+                      <Checkbox label="Description & SEO" checked={syncDescription} onChange={setSyncDescription} />
+                    </InlineStack>
 
-                      <InlineStack gap="200" blockAlign="end">
-                        <div style={{ flex: 1 }}>
-                          <TextField
-                            label="Add tag"
-                            labelHidden
-                            placeholder="Add new tag..."
-                            value={newTagInputs[product.id] || ""}
-                            onChange={(value) => setNewTagInputs(prev => ({ ...prev, [product.id]: value }))}
-                            autoComplete="off"
-                            size="slim"
-                            connectedRight={
-                              <Button
-                                onClick={() => addTag(product.id, product)}
-                              >
-                                Add
-                              </Button>
-                            }
-                          />
-                        </div>
-                      </InlineStack>
+                    {selectedResources.length > 0 && selectedResources.length < analyzedProducts.length && (
+                      <Button onClick={handleSyncSelected} loading={isSyncing}>
+                        {`Apply ${selectedResources.length} Selected Only`}
+                      </Button>
+                    )}
+                  </BlockStack>
+                </Card>
+              )}
 
-                      {product.currentTags && (
+              {/* Products Table */}
+              <Card padding="0">
+                <IndexTable
+                  resourceName={resourceName}
+                  itemCount={products.length}
+                  selectedItemsCount={allResourcesSelected ? "All" : selectedResources.length}
+                  onSelectionChange={handleSelectionChange}
+                  headings={[
+                    { title: "Image" },
+                    { title: "Product" },
+                    { title: "Status" },
+                    { title: "Details" },
+                  ]}
+                  selectable={analyzedProducts.length > 0}
+                >
+                  {rowMarkup}
+                </IndexTable>
+              </Card>
+
+              {/* Expanded Details */}
+              {products.map((product) => {
+                if (!expandedRows.has(product.id) || product.status !== "ANALYZED") return null;
+
+                return (
+                  <Card key={`detail-${product.id}`}>
+                    <BlockStack gap="400">
+                      <Text as="h3" variant="headingMd">{product.title} - AI Suggestions</Text>
+
+                      <Layout>
+                        <Layout.Section variant="oneHalf">
+                          <BlockStack gap="300">
+                            <Text as="h4" variant="headingSm">Suggested Metafields</Text>
+                            {product.suggestedMetafields ? (
+                              <BlockStack gap="200">
+                                {Object.entries(product.suggestedMetafields)
+                                  .filter(([key]) => key !== "alt_text")
+                                  .map(([key, value]) => (
+                                    <TextField
+                                      key={key}
+                                      label={key.replace(/_/g, " ")}
+                                      value={getMetafieldValue(product.id, key, value)}
+                                      onChange={(newValue) => updateMetafieldEdit(product.id, key, newValue)}
+                                      autoComplete="off"
+                                      size="slim"
+                                    />
+                                  ))}
+                              </BlockStack>
+                            ) : (
+                              <Text as="p" variant="bodySm" tone="subdued">No metafields suggested</Text>
+                            )}
+
+                            {(product.suggestedMetafields?.alt_text || edits[product.id]?.alt_text) && (
+                              <BlockStack gap="200">
+                                <Divider />
+                                <TextField
+                                  label="Alt Text"
+                                  value={getAltText(product.id, product.suggestedMetafields?.alt_text)}
+                                  onChange={(newValue) => updateAltTextEdit(product.id, newValue)}
+                                  autoComplete="off"
+                                  multiline={2}
+                                  helpText="Max 125 characters for accessibility"
+                                />
+                              </BlockStack>
+                            )}
+                          </BlockStack>
+                        </Layout.Section>
+
+                        <Layout.Section variant="oneHalf">
+                          <BlockStack gap="300">
+                            <Text as="h4" variant="headingSm">Suggested Tags</Text>
+                            <InlineStack gap="100" wrap>
+                              {getTags(product.id, product.suggestedTags).map((tag, i) => (
+                                <Tag key={i} onRemove={() => removeTag(product.id, i, product)}>{tag}</Tag>
+                              ))}
+                            </InlineStack>
+
+                            <InlineStack gap="200" blockAlign="end">
+                              <div style={{ flex: 1 }}>
+                                <TextField
+                                  label="Add tag"
+                                  labelHidden
+                                  placeholder="Add new tag..."
+                                  value={newTagInputs[product.id] || ""}
+                                  onChange={(value) => setNewTagInputs(prev => ({ ...prev, [product.id]: value }))}
+                                  autoComplete="off"
+                                  size="slim"
+                                  connectedRight={<Button onClick={() => addTag(product.id, product)}>Add</Button>}
+                                />
+                              </div>
+                            </InlineStack>
+
+                            {product.currentTags && (
+                              <>
+                                <Divider />
+                                <Text as="h4" variant="headingSm">Current Tags</Text>
+                                <Text as="p" variant="bodySm" tone="subdued">{product.currentTags || "None"}</Text>
+                              </>
+                            )}
+                          </BlockStack>
+                        </Layout.Section>
+                      </Layout>
+
+                      {(product.suggestedDescription || product.suggestedSeoTitle || product.suggestedMetaDescription) && (
                         <>
                           <Divider />
-                          <Text as="h4" variant="headingSm">
-                            Current Tags
-                          </Text>
-                          <Text as="p" variant="bodySm" tone="subdued">
-                            {product.currentTags || "None"}
-                          </Text>
+                          <Text as="h4" variant="headingSm">Description & SEO</Text>
+                          <BlockStack gap="200">
+                            {product.suggestedDescription != null && (
+                              <TextField
+                                label="Product Description"
+                                value={getDescription(product.id, product.suggestedDescription)}
+                                onChange={(v) => updateDescriptionEdit(product.id, v)}
+                                autoComplete="off"
+                                multiline={4}
+                                helpText="Syncs to your product's main description"
+                              />
+                            )}
+                            {product.suggestedSeoTitle != null && (
+                              <TextField
+                                label="SEO Title"
+                                value={getSeoTitle(product.id, product.suggestedSeoTitle)}
+                                onChange={(v) => updateSeoTitleEdit(product.id, v)}
+                                autoComplete="off"
+                                helpText={`${getSeoTitle(product.id, product.suggestedSeoTitle).length}/70 characters`}
+                              />
+                            )}
+                            {product.suggestedMetaDescription != null && (
+                              <TextField
+                                label="Meta Description"
+                                value={getMetaDescription(product.id, product.suggestedMetaDescription)}
+                                onChange={(v) => updateMetaDescriptionEdit(product.id, v)}
+                                autoComplete="off"
+                                multiline={2}
+                                helpText={`${getMetaDescription(product.id, product.suggestedMetaDescription).length}/160 characters`}
+                              />
+                            )}
+                          </BlockStack>
                         </>
                       )}
                     </BlockStack>
-                  </Layout.Section>
-                </Layout>
-
-                {/* Description & SEO - only show if product has description/SEO data */}
-                {(product.suggestedDescription || product.suggestedSeoTitle || product.suggestedMetaDescription) && (
-                  <>
-                    <Divider />
-                    <Text as="h4" variant="headingSm">
-                      Description & SEO
-                    </Text>
-                    <BlockStack gap="200">
-                      {product.suggestedDescription != null && (
-                        <TextField
-                          label="Product Description"
-                          value={getDescription(product.id, product.suggestedDescription)}
-                          onChange={(v) => updateDescriptionEdit(product.id, v)}
-                          autoComplete="off"
-                          multiline={4}
-                          helpText="Syncs to your product's main description"
-                        />
-                      )}
-                      {product.suggestedSeoTitle != null && (
-                        <TextField
-                          label="SEO Title"
-                          value={getSeoTitle(product.id, product.suggestedSeoTitle)}
-                          onChange={(v) => updateSeoTitleEdit(product.id, v)}
-                          autoComplete="off"
-                          helpText={`${getSeoTitle(product.id, product.suggestedSeoTitle).length}/70 characters`}
-                        />
-                      )}
-                      {product.suggestedMetaDescription != null && (
-                        <TextField
-                          label="Meta Description"
-                          value={getMetaDescription(product.id, product.suggestedMetaDescription)}
-                          onChange={(v) => updateMetaDescriptionEdit(product.id, v)}
-                          autoComplete="off"
-                          multiline={2}
-                          helpText={`${getMetaDescription(product.id, product.suggestedMetaDescription).length}/160 characters`}
-                        />
-                      )}
-                    </BlockStack>
-                  </>
-                )}
-              </BlockStack>
-            </Card>
-          );
-        })}
+                  </Card>
+                );
+              })}
+            </>
+          )}
         </BlockStack>
       </Box>
     </Page>

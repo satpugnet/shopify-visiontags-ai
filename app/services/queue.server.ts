@@ -35,6 +35,7 @@ export interface AnalysisJobData {
   productId: string;
   imageUrl: string;
   shop: string;
+  industryId?: string;
 }
 
 // Singleton instances
@@ -79,13 +80,14 @@ export async function queueProductAnalysis(
   jobId: string,
   productId: string,
   imageUrl: string,
-  shop: string
+  shop: string,
+  industryId?: string
 ): Promise<BullJob<AnalysisJobData>> {
   const queue = getAnalysisQueue();
   const sanitizedProductId = sanitizeJobId(productId);
   return queue.add(
     `analyze-${sanitizedProductId}`,
-    { jobId, productId, imageUrl, shop },
+    { jobId, productId, imageUrl, shop, industryId },
     {
       jobId: `${jobId}-${sanitizedProductId}`, // Unique job ID to prevent duplicates
     }
@@ -98,7 +100,8 @@ export async function queueProductAnalysis(
 export async function queueBulkAnalysis(
   jobId: string,
   products: Array<{ id: string; imageUrl: string }>,
-  shop: string
+  shop: string,
+  industryId?: string
 ): Promise<void> {
   const queue = getAnalysisQueue();
 
@@ -111,6 +114,7 @@ export async function queueBulkAnalysis(
         productId: product.id,
         imageUrl: product.imageUrl,
         shop,
+        industryId,
       },
       opts: {
         jobId: `${jobId}-${sanitizedProductId}`,
@@ -169,9 +173,9 @@ export function startAnalysisWorker(): Worker<AnalysisJobData> {
   analysisWorker = new Worker<AnalysisJobData>(
     QUEUE_NAME,
     async (job) => {
-      const { jobId, productId, imageUrl, shop } = job.data;
+      const { jobId, productId, imageUrl, shop, industryId } = job.data;
 
-      logger.info("PRODUCT_ANALYSIS_STARTED", { shop, jobId, productId });
+      logger.info("PRODUCT_ANALYSIS_STARTED", { shop, jobId, productId, industryId });
 
       // Check if product still exists before doing expensive API call
       const productRecord = await prisma.product.findUnique({
@@ -198,7 +202,7 @@ export function startAnalysisWorker(): Worker<AnalysisJobData> {
           level: "info",
         });
 
-        const result = await analyzeProductImage(imageUrl);
+        const result = await analyzeProductImage(imageUrl, industryId);
 
         // Update the product in database (wrapped in try-catch for race conditions)
         try {

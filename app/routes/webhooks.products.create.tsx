@@ -74,8 +74,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     });
 
     // Queue for processing - pass the DB record ID (not the Shopify GID)
+    // Use cached industry from shop settings, fallback to "general"
+    const industryId = settings.industry || "general";
     try {
-      await queueProductAnalysis(job.id, dbProductId, productData.image.src, shop);
+      await queueProductAnalysis(job.id, dbProductId, productData.image.src, shop, industryId);
     } catch (queueError) {
       // Queue failed - don't deduct credits, clean up the job record
       logger.error("QUEUE_ERROR", {

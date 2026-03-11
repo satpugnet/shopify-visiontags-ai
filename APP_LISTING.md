@@ -1,27 +1,33 @@
 # VisionTags App Store Listing
 
 ## App Name
-VisionTags: AI Tags & SEO
+VisionTags: AI Commerce Readiness
 
 ## Tagline (62 characters max)
-Auto-fill metafields, tags, descriptions & SEO from product images
+Get discovered by ChatGPT Shopping & AI agents. One scan fills everything.
 
 ## Short Description (100 characters max)
-AI scans your product images to generate metafields, tags, descriptions, and SEO in one click.
+AI readiness score + one-click product enrichment for ChatGPT Shopping, Google AI Mode & Perplexity.
 
 ## Long Description (for App Store listing)
 
-VisionTags uses Claude AI vision to analyze your product images and automatically generate accurate metafields, tags, product descriptions, SEO titles, and meta descriptions. Instead of manually typing product attributes like materials, colors, styles, and categories, simply select products and let AI do the work. The app processes images in the background, so you can continue managing your store while products are being analyzed. Perfect for stores with large catalogs that need consistent, SEO-friendly product data without the tedious manual work.
+AI shopping agents are the new storefront. ChatGPT Shopping, Google AI Mode, and Perplexity recommend products based on structured data: descriptions, metafields, tags, alt text, and SEO. If your product data is incomplete, AI agents skip your store entirely.
+
+VisionTags fixes this in one scan. Our AI analyzes every product image and generates everything AI agents need: industry-specific metafields, SEO-optimized tags, product descriptions, page titles, meta descriptions, and alt text. The free AI Readiness Score shows exactly where your catalog gaps are before you scan.
+
+VisionTags automatically detects your store's industry (fashion, electronics, home, beauty, food, or general) and generates the right metafields for your products. No more fashion-biased data for electronics stores.
+
+Plus, our theme app extension injects Product JSON-LD structured data on every product page, making your catalog machine-readable for any AI agent or search engine.
 
 ---
 
 ## Key Features (in Partner Dashboard, max 5)
 
-1. AI analyzes images to generate metafields like materials, colors & styles
-2. SEO-optimized product tags automatically generated from your product images
-3. Bulk process your entire catalog with background jobs - no waiting required
-4. Product descriptions, SEO titles & meta descriptions from images
-5. Review and edit all AI suggestions before syncing to Shopify
+1. Free AI Readiness Score shows how discoverable your products are to AI agents
+2. One-click scan fills metafields, tags, descriptions, SEO & alt text from images
+3. Industry-adaptive AI: detects your store type and generates relevant attributes
+4. Product JSON-LD structured data via theme app extension
+5. Review and edit all AI suggestions before applying to Shopify
 
 ---
 
@@ -29,14 +35,13 @@ VisionTags uses Claude AI vision to analyze your product images and automaticall
 
 ### Free Plan - $0/month
 - 50 AI scans per month
-- Basic metafields (color, material, pattern)
-- Basic product tags
-- Perfect for trying out VisionTags
+- AI Readiness Score (unlimited)
+- Industry-adaptive metafields
+- Product JSON-LD structured data
 
 ### Pro Plan - $19/month
 - 5,000 AI scans per month
-- All metafield types
-- Advanced SEO tags
+- All Free features
 - Auto-sync for new products
 - Priority support
 
@@ -46,11 +51,11 @@ VisionTags uses Claude AI vision to analyze your product images and automaticall
 Products & Inventory > Product tagging
 
 ## Search Keywords (in Partner Dashboard, max 5)
-- AI tags
-- product tags
-- metafields
-- SEO description
-- alt text
+- AEO
+- AI shopping
+- agentic commerce
+- AI product data
+- ChatGPT shopping
 
 ---
 
@@ -66,28 +71,29 @@ Products & Inventory > Product tagging
 
 ## Screenshots Descriptions
 
-1. **Dashboard** - Main dashboard showing product count, credit usage, and recent scan jobs
-2. **Billing** - Plan comparison with Free and Pro tiers, credit tracking
-3. **AI Suggestions** - Job details showing AI-generated metafields and suggested tags for products
+1. **AI Readiness Score** - Free audit showing your store's AI discoverability score with per-category breakdown
+2. **Dashboard** - One-click Scan & Apply with industry detection, credit usage, and recent jobs
+3. **Scan Results** - Hero Apply All banner with optional detailed review of AI suggestions
+4. **Product JSON-LD** - Structured data automatically injected on product pages
 
 ---
 
 ## Demo Video Script (30-60 seconds)
 
 **[Opening - 5s]**
-"Tired of manually tagging products? VisionTags does it automatically with AI."
+"AI agents are the new storefront. Is your store ready?"
 
-**[Dashboard - 10s]**
-"Simply click Start AI Scan to analyze your product images."
+**[Readiness Score - 10s]**
+"Check your free AI Readiness Score to see how discoverable your products are to ChatGPT Shopping and Google AI Mode."
 
-**[Processing - 10s]**
-"Our AI examines each image and generates metafields like color, material, and pattern."
+**[Scan - 10s]**
+"Click Scan & Apply. VisionTags detects your industry and generates the right data for every product."
 
 **[Results - 15s]**
-"Review the suggestions - see tags like 'Winter Sports', 'Navy Blue', 'Abstract' - all generated automatically."
+"One click applies metafields, tags, descriptions, SEO, and alt text to your entire catalog."
 
-**[Sync - 10s]**
-"Select the products you want and sync to Shopify with one click."
+**[JSON-LD - 10s]**
+"Enable Product JSON-LD structured data so AI agents can read your product pages directly."
 
 **[Closing - 10s]**
-"VisionTags - AI-powered product tagging. Try it free today."
+"VisionTags: AI Commerce Readiness. Get discovered by the agents that drive sales."

@@ -49,6 +49,7 @@ const mockShopSettings = {
   shop: "test-shop.myshopify.com",
   plan: "PRO",
   autoSyncNewProducts: true,
+  industry: null,
 };
 
 const mockProductPayload = {
@@ -193,7 +194,8 @@ describe("webhooks.products.create", () => {
       mockJob.id,
       expect.stringContaining("gid://shopify/Product/123456789"),
       mockProductPayload.image.src,
-      "test-shop.myshopify.com"
+      "test-shop.myshopify.com",
+      "general",
     );
     expect(mocks.consumeCredits).toHaveBeenCalledWith("test-shop.myshopify.com", 1);
   });

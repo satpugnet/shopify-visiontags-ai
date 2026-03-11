@@ -173,6 +173,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const { hasAvailableCredits, consumeCredits } = await import(
       "../services/billing.server"
     );
+    const { detectIndustry } = await import("../services/industry.server");
 
     // Check for active scans (prevent concurrent scan race condition)
     const activeJobs = await prisma.job.findMany({
@@ -220,6 +221,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       });
     }
 
+    // Detect industry from fetched products and cache it
+    const industryId = detectIndustry(
+      products.map((p) => ({ category: p.category, productType: p.productType }))
+    );
+    await prisma.shopSettings.update({
+      where: { shop },
+      data: { industry: industryId },
+    }).catch(() => {/* ignore if shop settings don't exist yet */});
+
+    logger.info("INDUSTRY_DETECTED", { shop, industryId, productCount: products.length });
+
     // Check credits
     const creditCheck = await hasAvailableCredits(shop, products.length);
     if (!creditCheck.allowed) {
@@ -245,6 +257,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         shop,
         status: "QUEUED",
         totalItems: products.length,
+        industry: industryId,
       },
     });
 
@@ -280,7 +293,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       await queueBulkAnalysis(
         job.id,
         products.map((p) => ({ id: p.id, imageUrl: p.imageUrl })),
-        shop
+        shop,
+        industryId
       );
     } catch (queueError) {
       logger.error("QUEUE_ERROR", {
@@ -432,7 +446,7 @@ export default function Dashboard() {
     <Page>
       <TitleBar title="VisionTags Dashboard">
         <button variant="primary" onClick={startScan} disabled={isScanning || hasActiveJob}>
-          {isScanning ? "Starting..." : hasActiveJob ? "Scan in progress..." : "Start AI Scan"}
+          {isScanning ? "Starting..." : hasActiveJob ? "Scan in progress..." : "Scan & Apply"}
         </button>
       </TitleBar>
 
@@ -530,7 +544,7 @@ export default function Dashboard() {
                     loading={isScanning}
                     disabled={billing.creditsRemaining === 0 || hasActiveJob}
                   >
-                    {hasActiveJob ? "Scan in progress..." : "Start AI Scan"}
+                    {hasActiveJob ? "Scan in progress..." : "Scan & Apply"}
                   </Button>
                   {billing.plan === "FREE" && (
                     <Button onClick={() => window.open(planPickerUrl, "_top")}>Upgrade to Pro</Button>
@@ -548,14 +562,13 @@ export default function Dashboard() {
                 </Text>
                 <BlockStack gap="200">
                   <Text as="p" variant="bodyMd">
-                    1. Click "Start AI Scan" to analyze your product images
+                    1. Click "Scan & Apply" to analyze your product images
                   </Text>
                   <Text as="p" variant="bodyMd">
-                    2. AI fills metafields, generates SEO tags, and writes
-                    product descriptions
+                    2. AI fills metafields, tags, descriptions, and SEO
                   </Text>
                   <Text as="p" variant="bodyMd">
-                    3. Review suggestions and click "Apply" to update Shopify
+                    3. Confirm with "Apply All" to update your Shopify store
                   </Text>
                 </BlockStack>
               </BlockStack>
@@ -588,6 +601,27 @@ export default function Dashboard() {
             )}
           </BlockStack>
         </Card>
+
+        <Card>
+          <BlockStack gap="300">
+            <InlineStack align="space-between" blockAlign="center">
+              <Text as="h2" variant="headingMd">
+                AI Readiness Score
+              </Text>
+              <Badge tone="info">Free</Badge>
+            </InlineStack>
+            <Text as="p" variant="bodyMd">
+              Check how ready your products are for ChatGPT Shopping, Google AI Mode, and other AI agents.
+            </Text>
+            <Button onClick={() => navigate("/app/readiness")}>Check AI Readiness</Button>
+          </BlockStack>
+        </Card>
+
+        <Banner tone="info" title="Enable structured data for AI agents">
+          <p>
+            After applying scan results, go to Online Store &gt; Themes &gt; Customize &gt; App embeds &gt; toggle VisionTags Structured Data to add Product JSON-LD.
+          </p>
+        </Banner>
 
         <Layout>
           <Layout.Section variant="oneHalf">

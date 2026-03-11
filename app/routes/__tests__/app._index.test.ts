@@ -33,6 +33,7 @@ const mocks = vi.hoisted(() => ({
   syncPlanFromShopify: vi.fn(),
   getPlanPickerUrl: vi.fn(),
   countProducts: vi.fn(),
+  detectIndustry: vi.fn(),
   PLANS: {
     FREE: { credits: 50 },
     PRO: { credits: 5000 },
@@ -66,6 +67,10 @@ vi.mock("../../services/billing.server", () => ({
   syncPlanFromShopify: mocks.syncPlanFromShopify,
   getPlanPickerUrl: mocks.getPlanPickerUrl,
   PLANS: mocks.PLANS,
+}));
+
+vi.mock("../../services/industry.server", () => ({
+  detectIndustry: mocks.detectIndustry,
 }));
 
 // Import after mocking
@@ -136,6 +141,10 @@ beforeEach(() => {
   });
   // Default: no active jobs (concurrent scan check)
   mocks.prisma.job.findMany.mockResolvedValue([]);
+  // Default: industry detection returns general
+  mocks.detectIndustry.mockReturnValue("general");
+  // Default: shopSettings.update resolves (for industry caching)
+  mocks.prisma.shopSettings.update.mockResolvedValue({});
 });
 
 describe("app._index action", () => {
@@ -157,6 +166,7 @@ describe("app._index action", () => {
         shop: "test.myshopify.com",
         status: "QUEUED",
         totalItems: 2,
+        industry: "general",
       },
     });
     expect(mocks.queueBulkAnalysis).toHaveBeenCalledWith(
@@ -166,6 +176,7 @@ describe("app._index action", () => {
         { id: "gid://shopify/Product/2", imageUrl: "https://cdn.shopify.com/red-sneakers.jpg" },
       ],
       "test.myshopify.com",
+      "general",
     );
   });
 

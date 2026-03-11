@@ -1,0 +1,8 @@
+api_version = "2025-01"
+type = "theme"
+name = "VisionTags Structured Data"
+
+[[blocks]]
+type = "jsonld"
+name = "Product JSON-LD"
+target = "body"
