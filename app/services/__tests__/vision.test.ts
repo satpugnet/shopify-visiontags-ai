@@ -560,6 +560,60 @@ describe("analyzeProductImage (integration)", () => {
     }
   });
 
+  it("should include language in prompt when passed", async () => {
+    mockCreate.mockResolvedValue(validResponse);
+
+    await analyzeProductImage(
+      "https://cdn.shopify.com/image.jpg",
+      "fashion",
+      "Test Product",
+      "Portuguese",
+    );
+
+    const callArgs = mockCreate.mock.calls[0][0];
+    const textContent = callArgs.messages[0].content.find(
+      (c: { type: string }) => c.type === "text"
+    );
+    expect(textContent.text).toContain("Portuguese");
+  });
+
+  it("should include store name in prompt when passed", async () => {
+    mockCreate.mockResolvedValue(validResponse);
+
+    await analyzeProductImage(
+      "https://cdn.shopify.com/image.jpg",
+      "fashion",
+      "Test Product",
+      undefined,
+      "Cool Store",
+    );
+
+    const callArgs = mockCreate.mock.calls[0][0];
+    const textContent = callArgs.messages[0].content.find(
+      (c: { type: string }) => c.type === "text"
+    );
+    expect(textContent.text).toContain("Cool Store");
+  });
+
+  it("should include vendor in prompt when passed", async () => {
+    mockCreate.mockResolvedValue(validResponse);
+
+    await analyzeProductImage(
+      "https://cdn.shopify.com/image.jpg",
+      "fashion",
+      "Test Sneaker",
+      undefined,
+      undefined,
+      "Adidas",
+    );
+
+    const callArgs = mockCreate.mock.calls[0][0];
+    const textContent = callArgs.messages[0].content.find(
+      (c: { type: string }) => c.type === "text"
+    );
+    expect(textContent.text).toContain('Brand/Vendor: "Adidas"');
+  });
+
   it("should succeed when description fields are missing", async () => {
     mockCreate.mockResolvedValue({
       content: [

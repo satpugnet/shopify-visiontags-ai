@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
     shopSettings: {
       updateMany: vi.fn(),
       update: vi.fn(),
+      findUnique: vi.fn(),
     },
     $transaction: vi.fn(),
   },
@@ -84,6 +85,7 @@ const mockProducts = [
   {
     id: "gid://shopify/Product/1",
     title: "Blue T-Shirt",
+    vendor: "TestBrand",
     imageUrl: "https://cdn.shopify.com/blue-shirt.jpg",
     category: "Apparel",
     tags: ["cotton", "blue"],
@@ -91,6 +93,7 @@ const mockProducts = [
   {
     id: "gid://shopify/Product/2",
     title: "Red Sneakers",
+    vendor: "ShoeCo",
     imageUrl: "https://cdn.shopify.com/red-sneakers.jpg",
     category: "Footwear",
     tags: ["leather", "red"],
@@ -145,6 +148,12 @@ beforeEach(() => {
   mocks.detectIndustry.mockReturnValue("general");
   // Default: shopSettings.update resolves (for industry caching)
   mocks.prisma.shopSettings.update.mockResolvedValue({});
+  // Default: language setting is auto
+  mocks.prisma.shopSettings.findUnique.mockResolvedValue({ language: "auto" });
+  // Default: admin.graphql returns locale and shop name
+  mockAdmin.graphql.mockResolvedValue({
+    json: () => Promise.resolve({ data: { shop: { primaryLocale: { isoCode: "en" }, name: "Test Store" } } }),
+  });
 });
 
 describe("app._index action", () => {
@@ -172,11 +181,13 @@ describe("app._index action", () => {
     expect(mocks.queueBulkAnalysis).toHaveBeenCalledWith(
       "job-abc-123",
       [
-        { id: "gid://shopify/Product/1", imageUrl: "https://cdn.shopify.com/blue-shirt.jpg", title: "Blue T-Shirt" },
-        { id: "gid://shopify/Product/2", imageUrl: "https://cdn.shopify.com/red-sneakers.jpg", title: "Red Sneakers" },
+        { id: "gid://shopify/Product/1", imageUrl: "https://cdn.shopify.com/blue-shirt.jpg", title: "Blue T-Shirt", vendor: "TestBrand" },
+        { id: "gid://shopify/Product/2", imageUrl: "https://cdn.shopify.com/red-sneakers.jpg", title: "Red Sneakers", vendor: "ShoeCo" },
       ],
       "test.myshopify.com",
       "general",
+      "English",
+      "Test Store",
     );
   });
 

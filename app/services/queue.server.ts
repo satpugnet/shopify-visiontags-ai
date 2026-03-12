@@ -37,6 +37,9 @@ export interface AnalysisJobData {
   shop: string;
   industryId?: string;
   productTitle?: string;
+  vendor?: string;
+  language?: string;
+  storeName?: string;
 }
 
 // Singleton instances
@@ -83,13 +86,16 @@ export async function queueProductAnalysis(
   imageUrl: string,
   shop: string,
   industryId?: string,
-  productTitle?: string
+  productTitle?: string,
+  vendor?: string,
+  language?: string,
+  storeName?: string,
 ): Promise<BullJob<AnalysisJobData>> {
   const queue = getAnalysisQueue();
   const sanitizedProductId = sanitizeJobId(productId);
   return queue.add(
     `analyze-${sanitizedProductId}`,
-    { jobId, productId, imageUrl, shop, industryId, productTitle },
+    { jobId, productId, imageUrl, shop, industryId, productTitle, vendor, language, storeName },
     {
       jobId: `${jobId}-${sanitizedProductId}`, // Unique job ID to prevent duplicates
     }
@@ -101,9 +107,11 @@ export async function queueProductAnalysis(
  */
 export async function queueBulkAnalysis(
   jobId: string,
-  products: Array<{ id: string; imageUrl: string; title?: string }>,
+  products: Array<{ id: string; imageUrl: string; title?: string; vendor?: string }>,
   shop: string,
-  industryId?: string
+  industryId?: string,
+  language?: string,
+  storeName?: string,
 ): Promise<void> {
   const queue = getAnalysisQueue();
 
@@ -118,6 +126,9 @@ export async function queueBulkAnalysis(
         shop,
         industryId,
         productTitle: product.title,
+        vendor: product.vendor,
+        language,
+        storeName,
       },
       opts: {
         jobId: `${jobId}-${sanitizedProductId}`,
@@ -176,7 +187,7 @@ export function startAnalysisWorker(): Worker<AnalysisJobData> {
   analysisWorker = new Worker<AnalysisJobData>(
     QUEUE_NAME,
     async (job) => {
-      const { jobId, productId, imageUrl, shop, industryId, productTitle } = job.data;
+      const { jobId, productId, imageUrl, shop, industryId, productTitle, vendor, language, storeName } = job.data;
 
       logger.info("PRODUCT_ANALYSIS_STARTED", { shop, jobId, productId, industryId });
 
@@ -205,7 +216,7 @@ export function startAnalysisWorker(): Worker<AnalysisJobData> {
           level: "info",
         });
 
-        const result = await analyzeProductImage(imageUrl, industryId, productTitle);
+        const result = await analyzeProductImage(imageUrl, industryId, productTitle, language, storeName, vendor);
 
         // Update the product in database (wrapped in try-catch for race conditions)
         try {

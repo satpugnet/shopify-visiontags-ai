@@ -163,11 +163,10 @@ describe("Billing period expiration", () => {
   });
 
   it("should detect exactly 30 days as expired", () => {
-    const exactlyThirtyDaysAgo = new Date();
-    exactlyThirtyDaysAgo.setDate(exactlyThirtyDaysAgo.getDate() - 30);
-
-    const now = new Date();
     const thirtyDaysInMs = 30 * 24 * 60 * 60 * 1000;
+    const now = new Date();
+    const exactlyThirtyDaysAgo = new Date(now.getTime() - thirtyDaysInMs);
+
     const isExpired = now.getTime() - exactlyThirtyDaysAgo.getTime() >= thirtyDaysInMs;
 
     expect(isExpired).toBe(true);

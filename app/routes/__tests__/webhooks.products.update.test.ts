@@ -50,11 +50,13 @@ const mockShopSettings = {
   shop: "test-shop.myshopify.com",
   plan: "PRO",
   autoSyncNewProducts: true,
+  language: "auto",
 };
 
 const mockProductPayload = {
   id: 123456789,
   title: "Blue Cotton T-Shirt",
+  vendor: "TestBrand",
   product_type: "Apparel",
   tags: "existing-tag",
   image: {
@@ -225,6 +227,8 @@ describe("webhooks.products.update", () => {
       "test-shop.myshopify.com",
       undefined,
       mockProductPayload.title,
+      mockProductPayload.vendor,
+      undefined, // language (auto resolves to undefined)
     );
     expect(mocks.consumeCredits).toHaveBeenCalledWith("test-shop.myshopify.com", 1);
   });

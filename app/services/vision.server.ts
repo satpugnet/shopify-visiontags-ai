@@ -99,11 +99,23 @@ function optimizeImageUrl(imageUrl: string): string {
 export async function analyzeProductImage(
   imageUrl: string,
   industryId?: string,
-  productTitle?: string
+  productTitle?: string,
+  language?: string,
+  storeName?: string,
+  vendor?: string,
 ): Promise<VisionResponse> {
-  let prompt = buildVisionPrompt(industryId || "general");
+  let prompt = buildVisionPrompt(industryId || "general", language, storeName);
+
+  // Prepend product-level context
+  const contextLines: string[] = [];
   if (productTitle) {
-    prompt = `Product title: "${productTitle}"\n\n${prompt}`;
+    contextLines.push(`Product title: "${productTitle}"`);
+  }
+  if (vendor) {
+    contextLines.push(`Brand/Vendor: "${vendor}"`);
+  }
+  if (contextLines.length > 0) {
+    prompt = `${contextLines.join("\n")}\n\n${prompt}`;
   }
 
   // Dry run mode for stress testing (skips real API call)

@@ -169,40 +169,50 @@ export function detectIndustry(
  * Build the full vision prompt for a given industry.
  * Base structure always includes: tags, alt_text, description, seo_title, meta_description.
  * Only the metafields{} keys change per industry.
+ *
+ * @param industryId - The detected industry (fashion, electronics, etc.)
+ * @param language - Output language (e.g., "English", "Portuguese", "Spanish")
+ * @param storeName - The merchant's store name for context
  */
-export function buildVisionPrompt(industryId: string): string {
+export function buildVisionPrompt(
+  industryId: string,
+  language?: string,
+  storeName?: string,
+): string {
   const config = INDUSTRIES[industryId] || INDUSTRIES.general;
+  const lang = language || "English";
+  const store = storeName || "an e-commerce store";
 
   const metafieldEntries = Object.entries(config.metafieldKeys)
     .map(([key, info]) => `    "${key}": "${info.description} (e.g., ${info.examples.slice(0, 3).join(", ")})"`)
     .join(",\n");
 
-  return `Analyze this product image for an e-commerce store.
+  return `You are writing product content for ${store}.
+Write ALL output in ${lang}.
+
 ${config.promptFragment}
 
-Return a JSON object with THREE sections:
+Analyze the product image and return JSON:
 
 {
   "metafields": {
 ${metafieldEntries}
   },
-  "tags": [
-    // SEO keywords and descriptive strings (Title Case)
-    // Include: key product attributes as keywords
-    // Add: 3-5 descriptive vibe/occasion/use-case words
-  ],
-  "alt_text": "Descriptive alt text for accessibility and SEO, max 125 characters. Describe what the product looks like.",
-  "description": "2-4 sentence product description for the storefront. Describe what the product looks like based on the image. Include key attributes naturally. Write in a professional e-commerce tone. Plain text only, no HTML.",
-  "seo_title": "SEO page title, max 60 characters. Format: [Key Attribute] [Product Type].",
-  "meta_description": "Meta description for search results, max 155 characters. Compelling summary with key product attributes. Include a subtle call to action."
+  "tags": ["Title Case tags mixing factual attributes and discovery keywords"],
+  "alt_text": "Describe what is visible in the image. Max 125 chars.",
+  "description": "2-4 sentences. Describe THIS specific product, not a generic category. Preserve the brand name, model name, and any collaboration names from the product title. Mention specific visual details from the image (colors, textures, design elements). No filler phrases. Plain text only, no HTML.",
+  "seo_title": "Max 60 chars. Keep the brand and model name from the product title. Format: [Brand] [Model] [Product Type].",
+  "meta_description": "Max 155 chars. Compelling summary with key product attributes and a subtle call to action."
 }
 
-IMPORTANT RULES:
-1. Only include metafield keys where you can make a confident visual assessment
-2. Tags should be Title Case and include both factual and vibe/mood keywords
-3. alt_text should be descriptive and accessibility-friendly
-4. description should be plain text (no HTML, no markdown). seo_title max 60 chars. meta_description max 155 chars.
-5. Return valid JSON only - no markdown, no explanation`;
+RULES:
+1. Only include metafield keys where you can make a confident visual assessment.
+2. Tags: Title Case, mix of factual attributes and discovery keywords.
+3. alt_text: Describe what is visible in the image. Max 125 characters.
+4. NEVER use these phrases: "perfect for", "ideal for", "everyday wear", "versatile addition", "any wardrobe", "statement-making", "eye-catching", "must-have", "elevate your". Be specific, not generic.
+5. Preserve brand names, model names, and collaboration names from the product title in the description and SEO title. Do not replace them with generic terms.
+6. Write in ${lang}. All text fields (description, seo_title, meta_description, alt_text, tags) must be in ${lang}.
+7. Return valid JSON only. No markdown, no explanation.`;
 }
 
 /**

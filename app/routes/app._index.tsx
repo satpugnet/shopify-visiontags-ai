@@ -138,6 +138,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     });
   }
 
+  // Get language setting
+  const shopSettings = await prisma.shopSettings.findUnique({
+    where: { shop },
+    select: { language: true },
+  });
+  const language = shopSettings?.language ?? "auto";
+
   return json({
     shop,
     productCount,
@@ -148,6 +155,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     collections,
     pendingSyncCount,
     recentJobId: recentJob?.id ?? null,
+    language,
     jobs: jobs.map((job) => ({
       id: job.id,
       status: job.status,
@@ -165,6 +173,18 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const shop = session.shop;
   const formData = await request.formData();
   const action = formData.get("action");
+
+  if (action === "save-language") {
+    const language = formData.get("language") as string;
+    if (language) {
+      await prisma.shopSettings.upsert({
+        where: { shop },
+        update: { language },
+        create: { shop, language },
+      });
+    }
+    return json({ success: true });
+  }
 
   if (action === "start-scan") {
     // Import services
@@ -232,6 +252,67 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     logger.info("INDUSTRY_DETECTED", { shop, industryId, productCount: products.length });
 
+    // Resolve language and store name for AI prompt context
+    const shopSettingsForScan = await prisma.shopSettings.findUnique({
+      where: { shop },
+      select: { language: true },
+    });
+    let resolvedLanguage: string | undefined;
+    const langSetting = shopSettingsForScan?.language ?? "auto";
+    if (langSetting !== "auto") {
+      resolvedLanguage = langSetting;
+    } else {
+      // Auto-detect from Shopify shop locale
+      try {
+        const localeResponse = await admin.graphql(`
+          query getShopLocale {
+            shop {
+              primaryLocale { isoCode }
+            }
+          }
+        `);
+        const localeData = (await localeResponse.json()) as {
+          data?: { shop?: { primaryLocale?: { isoCode?: string } } };
+        };
+        const isoCode = localeData.data?.shop?.primaryLocale?.isoCode;
+        if (isoCode) {
+          // Extract language from locale (e.g., "pt-BR" -> "pt", "en" -> "en")
+          resolvedLanguage = isoCode.split("-")[0];
+        }
+      } catch {
+        // Fall through to undefined (will default to English in prompt)
+      }
+    }
+
+    // Fetch store name
+    let storeName: string | undefined;
+    try {
+      const shopResponse = await admin.graphql(`
+        query getShopName {
+          shop { name }
+        }
+      `);
+      const shopData = (await shopResponse.json()) as {
+        data?: { shop?: { name?: string } };
+      };
+      storeName = shopData.data?.shop?.name || undefined;
+    } catch {
+      // Fall through to undefined
+    }
+
+    // Map language codes to full names for the prompt
+    const languageNames: Record<string, string> = {
+      en: "English", pt: "Portuguese", es: "Spanish", fr: "French",
+      de: "German", it: "Italian", nl: "Dutch", ja: "Japanese",
+      ko: "Korean", zh: "Chinese", ar: "Arabic", ru: "Russian",
+      tr: "Turkish", pl: "Polish", sv: "Swedish", da: "Danish",
+      fi: "Finnish", nb: "Norwegian", cs: "Czech", ro: "Romanian",
+      hu: "Hungarian", th: "Thai", vi: "Vietnamese", he: "Hebrew",
+    };
+    const languageForPrompt = resolvedLanguage
+      ? languageNames[resolvedLanguage] || resolvedLanguage
+      : undefined;
+
     // Check credits
     const creditCheck = await hasAvailableCredits(shop, products.length);
     if (!creditCheck.allowed) {
@@ -292,9 +373,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     try {
       await queueBulkAnalysis(
         job.id,
-        products.map((p) => ({ id: p.id, imageUrl: p.imageUrl, title: p.title })),
+        products.map((p) => ({ id: p.id, imageUrl: p.imageUrl, title: p.title, vendor: p.vendor })),
         shop,
-        industryId
+        industryId,
+        languageForPrompt,
+        storeName,
       );
     } catch (queueError) {
       logger.error("QUEUE_ERROR", {
@@ -369,12 +452,14 @@ function relativeTime(dateStr: string): string {
 }
 
 export default function Dashboard() {
-  const { productCount, billing, jobs, proFeatures, proPrice, planPickerUrl, collections, pendingSyncCount, recentJobId } = useLoaderData<typeof loader>();
+  const { productCount, billing, jobs, proFeatures, proPrice, planPickerUrl, collections, pendingSyncCount, recentJobId, language } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<ActionData>();
+  const languageFetcher = useFetcher();
   const shopify = useAppBridge();
   const navigate = useNavigate();
   const revalidator = useRevalidator();
   const [selectedCollection, setSelectedCollection] = useState("all");
+  const [selectedLanguage, setSelectedLanguage] = useState(language);
 
   const isScanning =
     fetcher.state === "submitting" && fetcher.formData?.get("action") === "start-scan";
@@ -535,6 +620,31 @@ export default function Dashboard() {
                   options={collectionOptions}
                   value={selectedCollection}
                   onChange={setSelectedCollection}
+                />
+
+                <Select
+                  label="Output language"
+                  options={[
+                    { label: "Auto-detect from store", value: "auto" },
+                    { label: "English", value: "en" },
+                    { label: "Portuguese", value: "pt" },
+                    { label: "Spanish", value: "es" },
+                    { label: "French", value: "fr" },
+                    { label: "German", value: "de" },
+                    { label: "Italian", value: "it" },
+                    { label: "Dutch", value: "nl" },
+                    { label: "Japanese", value: "ja" },
+                    { label: "Korean", value: "ko" },
+                    { label: "Chinese", value: "zh" },
+                  ]}
+                  value={selectedLanguage}
+                  onChange={(value) => {
+                    setSelectedLanguage(value);
+                    languageFetcher.submit(
+                      { action: "save-language", language: value },
+                      { method: "POST" },
+                    );
+                  }}
                 />
 
                 <InlineStack gap="300">

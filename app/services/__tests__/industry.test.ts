@@ -137,6 +137,43 @@ describe("buildVisionPrompt", () => {
     expect(prompt).toContain("metafields");
     expect(prompt).toContain("Return valid JSON only");
   });
+
+  it("should include language instruction when language is passed", () => {
+    const prompt = buildVisionPrompt("fashion", "Portuguese");
+    expect(prompt).toContain("Write ALL output in Portuguese");
+    expect(prompt).toContain("must be in Portuguese");
+  });
+
+  it("should include store name when passed", () => {
+    const prompt = buildVisionPrompt("fashion", undefined, "MyStore");
+    expect(prompt).toContain("writing product content for MyStore");
+  });
+
+  it("should include both language and store name", () => {
+    const prompt = buildVisionPrompt("fashion", "Portuguese", "MyStore");
+    expect(prompt).toContain("writing product content for MyStore");
+    expect(prompt).toContain("Write ALL output in Portuguese");
+  });
+
+  it("should default to English when no language is passed", () => {
+    const prompt = buildVisionPrompt("general");
+    expect(prompt).toContain("Write ALL output in English");
+  });
+
+  it("should include banned phrases list", () => {
+    const prompt = buildVisionPrompt("general");
+    expect(prompt).toContain("perfect for");
+    expect(prompt).toContain("ideal for");
+    expect(prompt).toContain("everyday wear");
+    expect(prompt).toContain("must-have");
+    expect(prompt).toContain("NEVER use these phrases");
+  });
+
+  it("should include brand preservation rule", () => {
+    const prompt = buildVisionPrompt("general");
+    expect(prompt).toContain("Preserve brand names");
+    expect(prompt).toContain("collaboration names");
+  });
 });
 
 describe("getMetafieldMappings", () => {

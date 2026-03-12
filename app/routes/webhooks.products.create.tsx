@@ -9,6 +9,7 @@ import { logger } from "../services/logger.server";
 interface ProductCreatePayload {
   id: number;
   title: string;
+  vendor: string;
   product_type: string;
   tags: string;
   image?: {
@@ -77,7 +78,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     // Use cached industry from shop settings, fallback to "general"
     const industryId = settings.industry || "general";
     try {
-      await queueProductAnalysis(job.id, dbProductId, productData.image.src, shop, industryId, productData.title);
+      const language = settings.language !== "auto" ? settings.language : undefined;
+      await queueProductAnalysis(job.id, dbProductId, productData.image.src, shop, industryId, productData.title, productData.vendor, language);
     } catch (queueError) {
       // Queue failed - don't deduct credits, clean up the job record
       logger.error("QUEUE_ERROR", {

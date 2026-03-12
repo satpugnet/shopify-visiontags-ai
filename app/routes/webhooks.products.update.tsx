@@ -15,6 +15,7 @@ import { logger } from "../services/logger.server";
 interface ProductUpdatePayload {
   id: number;
   title: string;
+  vendor: string;
   product_type: string;
   tags: string;
   image?: {
@@ -102,7 +103,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     // Queue for processing - pass the DB record ID (not the Shopify GID)
     try {
-      await queueProductAnalysis(job.id, dbProductId, imageUrl, shop, undefined, productData.title);
+      const language = settings.language !== "auto" ? settings.language : undefined;
+      await queueProductAnalysis(job.id, dbProductId, imageUrl, shop, undefined, productData.title, productData.vendor, language);
     } catch (queueError) {
       logger.error("QUEUE_ERROR", {
         shop,

@@ -10,6 +10,7 @@ import { withRetry } from "./retry.server";
 export interface ShopifyProduct {
   id: string;
   title: string;
+  vendor: string;
   featuredImage?: {
     url: string;
   } | null;
@@ -23,6 +24,7 @@ export interface ShopifyProduct {
 export interface ProductWithImage {
   id: string;
   title: string;
+  vendor: string;
   imageUrl: string;
   category?: string;
   productType?: string;
@@ -115,6 +117,7 @@ export async function fetchAllProducts(
                   node {
                     id
                     title
+                    vendor
                     featuredImage {
                       url
                     }
@@ -155,6 +158,7 @@ export async function fetchAllProducts(
           products.push({
             id: product.id,
             title: product.title,
+            vendor: product.vendor,
             imageUrl: product.featuredImage.url,
             category: product.category?.name || product.productType,
             productType: product.productType,
@@ -188,6 +192,7 @@ export async function getProduct(
         product(id: $id) {
           id
           title
+          vendor
           featuredImage {
             url
           }
@@ -213,6 +218,7 @@ export async function getProduct(
     return {
       id: product.id,
       title: product.title,
+      vendor: product.vendor,
       imageUrl: product.featuredImage.url,
       category: product.category?.name || product.productType,
       tags: product.tags,
@@ -330,6 +336,7 @@ export async function fetchCollectionProducts(
                 node {
                   id
                   title
+                  vendor
                   featuredImage {
                     url
                   }
@@ -369,6 +376,7 @@ export async function fetchCollectionProducts(
           products.push({
             id: product.id,
             title: product.title,
+            vendor: product.vendor,
             imageUrl: product.featuredImage.url,
             category: product.category?.name || product.productType,
             productType: product.productType,

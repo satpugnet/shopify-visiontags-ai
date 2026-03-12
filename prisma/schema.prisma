@@ -76,6 +76,7 @@ model ShopSettings {
   shop                String    @unique
   plan                String    @default("FREE")
   industry            String?
+  language            String    @default("auto")
   creditsUsed         Int       @default(0)
   creditLimit         Int       @default(50)
   billingPeriodStart  DateTime  @default(now())
