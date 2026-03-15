@@ -25,15 +25,27 @@ Shopify app that uses Claude Vision to auto-fill metafields, tags, descriptions,
 - App Secret: (in .env, do not commit)
 - Dev Store URL: `<TO_BE_FILLED>`
 
+### Shopify Partner API
+- Auth: `SHOPIFY_PARTNER_API_TOKEN` in `.env` (token prefix: `prtapi_`)
+- Header: `X-Shopify-Access-Token: {token}` (NOT `Authorization: Bearer`)
+- API Version: Use `2025-07` or later (2025-04 does NOT work with this token). Confirmed: 2025-07, 2025-10, 2026-01, 2026-04, unstable.
+- Endpoint: `https://partners.shopify.com/4709749/api/{version}/graphql.json`
+- App GID: `gid://partners/App/314277724161`
+- Available event types: RELATIONSHIP_INSTALLED, RELATIONSHIP_UNINSTALLED, RELATIONSHIP_DEACTIVATED, RELATIONSHIP_REACTIVATED, SUBSCRIPTION_CHARGE_ACTIVATED, SUBSCRIPTION_CHARGE_CANCELED, SUBSCRIPTION_CHARGE_DECLINED, SUBSCRIPTION_CHARGE_EXPIRED, SUBSCRIPTION_CHARGE_FROZEN, SUBSCRIPTION_CHARGE_UNFROZEN, ONE_TIME_CHARGE_ACCEPTED, ONE_TIME_CHARGE_ACTIVATED, ONE_TIME_CHARGE_DECLINED, ONE_TIME_CHARGE_EXPIRED, CREDIT_APPLIED, CREDIT_FAILED, CREDIT_PENDING, USAGE_CHARGE_APPLIED
+- NOT available via API: App reviews, merchant messages, app listing analytics. Must check Partner Dashboard UI.
+
 ### Railway
 - Dashboard: https://railway.app
 - Project URL: `<TO_BE_FILLED>`
 - PostgreSQL Connection: (in .env)
 - Redis Connection: (in .env)
 
-### Anthropic
-- Console: https://console.anthropic.com
-- API Key: (in .env, do not commit)
+### AI API (OpenRouter)
+- Provider: OpenRouter (Anthropic Skin) routing to Claude Haiku 4.5
+- Auth: `OPENROUTER_API_KEY` in `.env`
+- Model: `anthropic/claude-haiku-4-5`
+- Balance check: `curl -s -H "Authorization: Bearer $OPENROUTER_API_KEY" "https://openrouter.ai/api/v1/auth/key"` (fields: `usage`, `usage_monthly`, `limit`, `limit_remaining`)
+- Cost per scan: ~$0.004 (1024 max_tokens)
 
 ### Production Database (Direct Access)
 - Connection: `DATABASE_URL` in `.env`
@@ -176,6 +188,19 @@ railway up
 | Product demo video | Published | https://youtu.be/AUxcuY3qSDo |
 | App Store screenshots | Needs update | TODO: Update screenshots to show description & SEO fields in latest UI. |
 
+## Distribution Channels (Trackable)
+
+| Channel | URL | Fetch Method | Status |
+|---------|-----|-------------|--------|
+| Reddit r/ShopifyAppDev | https://www.reddit.com/r/ShopifyAppDev/comments/1rk87l0/ | Chrome | Active |
+| Medium article | https://medium.com/p/55a2354327bc | Chrome | Active |
+| YouTube demo | https://youtu.be/AUxcuY3qSDo | Chrome | Active |
+| Shopify App Store | https://apps.shopify.com/visiontags-ai | WebFetch | Active |
+| Shopify Community #302953 | https://community.shopify.com/t/automatically-fill-out-product-metafields/302953 | WebFetch | Not posted |
+| Shopify Community #334809 | https://community.shopify.com/t/on-product-creation-populate-metafields-with-pre-defined-data/334809 | WebFetch | Not posted |
+| Shopify Community #550290 | https://community.shopify.com/t/how-do-you-come-up-with-keywords-for-your-products/550290 | WebFetch | Not posted |
+| Direct outreach | - | Gmail MCP (marco.a.duval@gmail.com) | Active |
+
 ## Marketing Assets
 
 - **Product Demo Video**: https://youtu.be/AUxcuY3qSDo
@@ -191,6 +216,18 @@ railway up
 - Descriptions wrapped in `<p>` tags for `descriptionHtml`. Claude returns plain text.
 - Description/SEO fields are optional in VisionResult. Scans succeed even if Claude omits them.
 - V1 simplifications: No revert button, no settings page, basic taxonomy validation, no multi-language
+
+## Business Metrics
+- **North star**: Active merchants who have run at least one scan
+- **Health signals**: New installs, scans completed, products synced, Pro upgrades
+- **Red flags**: Merchants with 0 scans (installed but never used), uninstalls, rising Sentry errors, jobs stuck in non-terminal status
+
+## Costs
+- **Railway** (hosting + Postgres + Redis): Free tier
+- **OpenRouter** (AI scans): Prepaid credits, usage-based at ~$0.004/scan. Check balance via API (see AI API section above).
+- **Sentry** (error tracking): Free tier
+- **Shopify Partner**: Free
+- **Total fixed monthly: $0**. Only variable cost is OpenRouter usage per scan.
 
 ## TODO
 
