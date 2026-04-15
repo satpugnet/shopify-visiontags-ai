@@ -168,6 +168,8 @@ railway up
 | Phoenix Publishing | phoenix.publishing.com@gmail.com | Pro ($19/mo) | Feb 2026 | First paying customer. Applied $5 discount for 1 month. Sent thank-you email from marco.a.duval@gmail.com (Feb 19, 2026) requesting feedback and App Store review. |
 | AURASPINE | Unknown | Unknown | ~Feb 20, 2026 | New customer, appeared organically (not from known outreach). Origin unverified. |
 | pro-grab-bar.myshopify.com | Unknown | Unknown | ~Feb 20, 2026 | Seen in production webhook logs (products/update). App installed. |
+| Patched Works (patchedworks.com) | julie@patchedworks.com | Churned (Free) | Mar 16, 2026 | Quilting fabric & kits shop, Elm Grove WI. 10,000+ item catalog. Installed and uninstalled in 13 min. Wanted bulk color identification. ChatGPT recommended the app. Didn't realize it extracts color. Sent win-back email from marco.a.duval@gmail.com (Mar 19, 2026) explaining color extraction workflow and offering 50-item free test. |
+| Demo Store (seth-beer-dev) | Unknown | Free | Mar 12, 2026 | Likely a test/dev store, not a real merchant. |
 
 ### Community Contacts (from `COMMUNITY_OUTREACH.md`)
 
