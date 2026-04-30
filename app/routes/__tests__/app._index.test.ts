@@ -371,6 +371,37 @@ describe("app._index loader", () => {
     expect(data.billing.plan).toBe("FREE");
   });
 
+  it("does not break dashboard when countProducts throws (first-run resilience)", async () => {
+    // Regression test: a transient Shopify GraphQL failure on countProducts must
+    // not propagate out of the loader. Otherwise the merchant sees a broken
+    // iframe on first install and uninstalls (observed for vis24druck and
+    // jvzgd4-dh on 2026-04-05 and 2026-04-25).
+    mocks.countProducts.mockRejectedValue(new Error("Throttled"));
+    mockAdmin.graphql.mockResolvedValue({
+      json: () => Promise.resolve({ data: { collections: { nodes: [] } } }),
+    });
+
+    const response = await loader({ request: createLoaderRequest() } as any);
+    const data = await response.json();
+
+    expect(data.productCount).toBe(0);
+    expect(data.billing.plan).toBe("FREE");
+    expect(data.collections).toEqual([]);
+  });
+
+  it("does not break dashboard when cleanupStaleJobs throws", async () => {
+    mocks.cleanupStaleJobs.mockRejectedValue(new Error("DB connection error"));
+    mockAdmin.graphql.mockResolvedValue({
+      json: () => Promise.resolve({ data: { collections: { nodes: [] } } }),
+    });
+
+    const response = await loader({ request: createLoaderRequest() } as any);
+    const data = await response.json();
+
+    expect(data.productCount).toBe(10);
+    expect(data.billing.plan).toBe("FREE");
+  });
+
   it("returns pendingSyncCount and syncedCount for completed job with unsynced products", async () => {
     mockAdmin.graphql.mockResolvedValue({
       json: () => Promise.resolve({ data: { collections: { nodes: [] } } }),

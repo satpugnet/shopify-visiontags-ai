@@ -64,12 +64,29 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   // Sync plan status from Shopify (Managed Pricing)
   await syncPlanFromShopify(admin, shop);
 
-  // Clean up stale jobs (stuck > 15 min)
-  const { cleanupStaleJobs } = await import("../services/queue.server");
-  await cleanupStaleJobs(shop);
+  // Clean up stale jobs (stuck > 15 min). Non-critical — never block dashboard.
+  try {
+    const { cleanupStaleJobs } = await import("../services/queue.server");
+    await cleanupStaleJobs(shop);
+  } catch (error) {
+    logger.error("STALE_JOB_CLEANUP_ERROR", {
+      shop,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 
-  // Get product count
-  const productCount = await countProducts(admin);
+  // Get product count. Don't break the dashboard if Shopify GraphQL fails —
+  // a transient API error or rate limit during first-run would otherwise
+  // throw out of the loader and the merchant sees a broken iframe.
+  let productCount = 0;
+  try {
+    productCount = await countProducts(admin);
+  } catch (error) {
+    logger.error("PRODUCT_COUNT_FAILED", {
+      shop,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 
   // Get billing info
   const billing = await getShopBilling(shop);
