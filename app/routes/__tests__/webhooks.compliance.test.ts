@@ -166,4 +166,16 @@ describe("webhooks.compliance (unified handler)", () => {
       where: { shop: "test-shop.myshopify.com" },
     });
   });
+
+  it("should return 200 when webhook auth fails (GDPR ack within 24h required)", async () => {
+    mocks.authenticate.webhook.mockRejectedValue(
+      new Error("Invalid HMAC signature")
+    );
+
+    const response = await complianceAction({ request: createMockRequest() } as any);
+
+    expect(response.status).toBe(200);
+    expect(mocks.prisma.shopSettings.findUnique).not.toHaveBeenCalled();
+    expect(mocks.prisma.product.deleteMany).not.toHaveBeenCalled();
+  });
 });

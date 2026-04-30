@@ -10,12 +10,29 @@
  */
 
 import type { ActionFunctionArgs } from "@remix-run/node";
+import * as Sentry from "@sentry/remix";
 import { authenticate } from "../shopify.server";
 import db from "../db.server";
 import { logger } from "../services/logger.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { shop, topic } = await authenticate.webhook(request);
+  let shop: string;
+  let topic: string;
+  try {
+    ({ shop, topic } = await authenticate.webhook(request));
+  } catch (error) {
+    // Always return 200 on webhook auth failure to avoid Shopify retry storms.
+    // GDPR webhooks especially must be acknowledged within 24h to maintain
+    // App Store compliance — never throw.
+    logger.warn("WEBHOOK_AUTH_FAILED", {
+      route: "compliance",
+      error: error instanceof Error ? error.message : String(error),
+    });
+    Sentry.captureException(error, {
+      tags: { service: "webhook", route: "compliance", phase: "auth" },
+    });
+    return new Response(null, { status: 200 });
+  }
 
   logger.info("WEBHOOK_RECEIVED", { shop, topic, handler: "compliance" });
 
