@@ -21,7 +21,6 @@ import {
   Divider,
   Banner,
   TextField,
-  List,
 } from "@shopify/polaris";
 import { TitleBar, useAppBridge } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
@@ -379,13 +378,6 @@ type ActionData = {
   synced?: number;
   reverted?: number;
 };
-
-function jobDisplayStatus(job: { status: string; totalItems: number; syncedCount: number }) {
-  if (job.status === "QUEUED" || job.status === "PROCESSING") return { label: "Scanning...", tone: "info" as const };
-  if (job.status === "FAILED") return { label: "Failed", tone: "critical" as const };
-  if (job.syncedCount >= job.totalItems) return { label: "Applied", tone: "success" as const };
-  return { label: "Ready to Apply", tone: "attention" as const };
-}
 
 function productDisplayStatus(status: string) {
   switch (status) {
