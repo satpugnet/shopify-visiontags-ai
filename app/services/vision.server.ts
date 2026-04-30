@@ -163,8 +163,11 @@ export async function analyzeProductImage(
       { maxRetries: 3, baseDelayMs: 2000, logEvent: "VISION_API_RETRY" }
     );
 
-    // Extract text content from response
-    const textContent = response.content.find((block) => block.type === "text");
+    // Extract text content from response. Defensive null guard: OpenRouter
+    // can return responses without a `content` array on rare upstream errors,
+    // which previously surfaced as "Cannot read properties of undefined" in
+    // Product.error (4 such failures observed on 2026-03-12).
+    const textContent = response.content?.find((block) => block.type === "text");
     if (!textContent || textContent.type !== "text") {
       return {
         error: "No text response from Claude",
