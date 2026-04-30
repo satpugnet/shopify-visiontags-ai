@@ -18,7 +18,24 @@ interface ProductCreatePayload {
 }
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { shop, topic, payload } = await authenticate.webhook(request);
+  let shop: string;
+  let topic: string;
+  let payload: unknown;
+  try {
+    ({ shop, topic, payload } = await authenticate.webhook(request));
+  } catch (error) {
+    // Always return 200 on webhook auth failure to avoid Shopify retry storms
+    // that can eventually auto-disable the subscription. The error is still
+    // captured in Sentry for visibility.
+    logger.warn("WEBHOOK_AUTH_FAILED", {
+      route: "products.create",
+      error: error instanceof Error ? error.message : String(error),
+    });
+    Sentry.captureException(error, {
+      tags: { service: "webhook", route: "products.create", phase: "auth" },
+    });
+    return new Response();
+  }
 
   try {
     logger.info("WEBHOOK_RECEIVED", { shop, topic });

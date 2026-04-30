@@ -248,6 +248,18 @@ describe("webhooks.products.create", () => {
     expect(response.status).toBe(200);
   });
 
+  it("should return 200 when webhook auth fails (avoid Shopify retry storms)", async () => {
+    mocks.authenticate.webhook.mockRejectedValue(
+      new Error("Invalid HMAC signature")
+    );
+
+    const response = await action({ request: createMockRequest() } as any);
+
+    expect(response.status).toBe(200);
+    expect(mocks.prisma.shopSettings.findUnique).not.toHaveBeenCalled();
+    expect(mocks.queueProductAnalysis).not.toHaveBeenCalled();
+  });
+
   it("should still run analysis if credit deduction fails", async () => {
     mocks.authenticate.webhook.mockResolvedValue({
       shop: "test-shop.myshopify.com",
