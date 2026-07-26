@@ -115,10 +115,10 @@ Uses Shopify Managed Pricing (fixed recurring only, no usage-based billing).
 
 ## Current Progress
 
-**Last updated**: Feb 19, 2026
+**Last updated**: Jul 26, 2026
 **Current phase**: Live on Shopify App Store
 **Billing**: Uses Shopify Managed Pricing (plans configured in Partner Dashboard, NOT in code)
-**Active merchants (as of Feb 19, 2026)**: 1 paying (Phoenix Publishing, Pro plan)
+**Merchants (as of Jul 26, 2026, from production DB)**: 26 total installs, all on FREE plan. **0 paying — $0 MRR.** The former Pro customer (`resalefirm.myshopify.com`, 816 scans in Mar 2026 — the "Phoenix Publishing" first-paying customer) has churned back to FREE. No active subscription charges (confirmed via Partner API: no `SUBSCRIPTION_CHARGE_ACTIVATED` events in recent history). Several free installs hit the 50-credit cap and uninstalled rather than upgrading (`bgjgv1-6z`, `0fe70f-2c`, `a2f506-2`) — the paid-conversion leak. Steady trickle of new installs continues (last install Jul 26).
 **Next steps**:
 1. Grow distribution (App Store SEO, content marketing, direct outreach)
 2. Iterate based on customer feedback
