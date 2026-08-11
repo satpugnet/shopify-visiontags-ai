@@ -23,7 +23,7 @@ Shopify app that uses Claude Vision to auto-fill metafields, tags, descriptions,
 - Partner Dashboard App URL: https://partners.shopify.com/4709749/apps/314277724161/overview
 - App API Key: (in .env, do not commit)
 - App Secret: (in .env, do not commit)
-- Dev Store URL: `<TO_BE_FILLED>`
+- Dev Store URL: visiontags-dev.myshopify.com (has the app installed; seen in production DB with 46 scanned products)
 
 ### Shopify Partner API
 - Auth: `SHOPIFY_PARTNER_API_TOKEN` in `.env` (token prefix: `prtapi_`)
