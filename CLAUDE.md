@@ -100,18 +100,30 @@ app/
 
 ## Pricing Model (Credit-Based)
 
-| Plan  | Price   | Credits/mo | Features |
-|-------|---------|------------|----------|
-| Free  | $0      | 50         | Basic scan |
-| Pro   | $19/mo  | 5,000      | Auto-sync, all features |
+| Plan  | Price   | Credits/mo | Per-run limit | Features |
+|-------|---------|------------|---------------|----------|
+| Free  | $0      | 50         | 50            | Basic scan |
+| Pro   | $19/mo (or $199/yr) | 5,000 | 500   | Auto-sync, all features |
+| Scale | $79/mo  | 15,000     | 2,000         | Everything in Pro, high-volume backfills |
 
 Hard cap at plan limit — no overage. Credits reset each billing cycle.
 Uses Shopify Managed Pricing (fixed recurring only, no usage-based billing).
+
+**IMPORTANT — plan display names are a contract**: the app resolves plans from the
+Managed Pricing plan Display Name ("Free"/"Pro"/"Scale", case-insensitive) in
+`billing.server.ts` (`resolvePlanFromSubscriptionName`). Renaming a plan in the
+Partner Dashboard breaks plan resolution (unknown paid names fall back to PRO and
+log `PLAN_NAME_UNRECOGNIZED`).
+
+Scans skip already-analyzed products via the `ScannedProduct` ledger (cross-run
+dedup, no double-charging); merchants can rescan via the "Include already-scanned
+products" checkbox. Failed scans can be retried free from the job page.
 
 ### Cost Analysis (Claude Haiku 4.5)
 - Cost per scan: ~$0.004 (1024 max_tokens)
 - Free (50 scans): ~$0.20 cost (acquisition)
 - Pro (5,000 scans): ~$20 cost, break-even at $19 (reinforces case for $29 pricing)
+- Scale (15,000 scans): ~$60 cost worst case at $79 (thin if maxed; typical usage is partial — LaFetch's 11k backfill ≈ $44)
 
 ## Current Progress
 
@@ -120,10 +132,11 @@ Uses Shopify Managed Pricing (fixed recurring only, no usage-based billing).
 **Billing**: Uses Shopify Managed Pricing (plans configured in Partner Dashboard, NOT in code)
 **Merchants (as of Jul 26, 2026, from production DB)**: 26 total installs, all on FREE plan. **0 paying — $0 MRR.** The former Pro customer (`resalefirm.myshopify.com`, 816 scans in Mar 2026 — the "Phoenix Publishing" first-paying customer) has churned back to FREE. No active subscription charges (confirmed via Partner API: no `SUBSCRIPTION_CHARGE_ACTIVATED` events in recent history). Several free installs hit the 50-credit cap and uninstalled rather than upgrading (`bgjgv1-6z`, `0fe70f-2c`, `a2f506-2`) — the paid-conversion leak. Steady trickle of new installs continues (last install Jul 26).
 **Next steps**:
-1. Grow distribution (App Store SEO, content marketing, direct outreach)
-2. Iterate based on customer feedback
-3. Ship Phase 1 quick wins: settings page + custom prompts, rescan failed, free tier bump
-4. Implement new 3-tier pricing ($0/$29/$79)
+1. Create the "Scale" plan in the Partner Dashboard Managed Pricing UI ($79/mo, display name exactly `Scale`, 0 trial days) — code shipped Aug 11, waiting on this manual step
+2. Reply to LaFetch (Sagar@la-fetch.com) once Scale is live; get them upgraded for the 11k backfill
+3. Grow distribution (App Store SEO, content marketing, direct outreach)
+4. Remaining quick wins: settings page + custom prompts, free tier bump, Pro repricing to $29
+5. Fast-follow: job-detail page pagination (2,000-row Scale jobs load unpaginated), jobs history page, collections picker >50
 
 ## Development Commands
 
@@ -158,6 +171,7 @@ railway up
 
 ## Recent Changes
 
+- **Aug 11, 2026**: Shipped the LaFetch feedback package: (1) Scale plan ($79/mo, 15,000 credits, 2,000 products/run) — plan resolution refactored to name-based `setPlan`/resolvers supporting 3 tiers; (2) `ScannedProduct` cross-run ledger — scans now skip already-analyzed products and keep paginating until the batch fills with new ones (fixes "All products" runs re-scanning the same first 500 and double-charging); "Include already-scanned" checkbox for intentional rescans; "Products scanned X/N" progress on dashboard; (3) fixed broken "Apply to Shopify" auto-chain (server-selected 50-product batches, client resubmits until done — was 1 click per 50 products); (4) "Retry failed scans" button, free (no credit charge); (5) worker job-progress query fixed (was O(n²) at large runs); (6) security: job loader/actions now scoped to the authenticated shop; (7) backfill script `scripts/backfill-scan-ledger.ts` (run once after deploy). Trigger: LaFetch (la-fetch.myshopify.com, Pro) emailed Aug 11 asking how to backfill an 11k-product catalog — their two 500-product runs on Aug 10 had 100% overlap (500 credits double-charged, refunded).
 - **Feb 20, 2026**: Migrated from Anthropic API to OpenRouter (Anthropic Skin) for better rate limits. Added Sentry error tracking (vision service + queue worker). Added dry run mode for stress testing. Raised scan limit from 100 to plan-based (50 Free / 500 Pro).
 - **Feb 19, 2026**: Shipped product descriptions + SEO generation (descriptions, SEO titles, meta descriptions generated from product images). Updated App Store listing with new features and search terms. Published Medium article on AI shopping readiness.
 
@@ -165,7 +179,8 @@ railway up
 
 | Store | Email | Plan | Joined | Notes |
 |-------|-------|------|--------|-------|
-| Phoenix Publishing | phoenix.publishing.com@gmail.com | Pro ($19/mo) | Feb 2026 | First paying customer. Applied $5 discount for 1 month. Sent thank-you email from marco.a.duval@gmail.com (Feb 19, 2026) requesting feedback and App Store review. |
+| LaFetch (la-fetch.myshopify.com, la-fetch.com) | Sagar@la-fetch.com (Sagar Joon, AI Developer) | Pro ($19/mo) | Aug 10, 2026 | Second paying customer. 11,000-product catalog, doing a one-time tagging backfill. Emailed Aug 11 asking about bulk credits, per-run limits, untagged-only filtering, and double-charging — triggered the Scale plan + scan ledger release (see Recent Changes Aug 11). Their two 500-product runs on Aug 10 overlapped 100%; 500 credits refunded. Target: upgrade to Scale for one month to complete the backfill. |
+| Phoenix Publishing | phoenix.publishing.com@gmail.com | Pro ($19/mo) | Feb 2026 | First paying customer. Applied $5 discount for 1 month. Sent thank-you email from marco.a.duval@gmail.com (Feb 19, 2026) requesting feedback and App Store review. Churned back to FREE (as of Jul 2026). |
 | AURASPINE | Unknown | Unknown | ~Feb 20, 2026 | New customer, appeared organically (not from known outreach). Origin unverified. |
 | pro-grab-bar.myshopify.com | Unknown | Unknown | ~Feb 20, 2026 | Seen in production webhook logs (products/update). App installed. |
 | Patched Works (patchedworks.com) | julie@patchedworks.com | Churned (Free) | Mar 16, 2026 | Quilting fabric & kits shop, Elm Grove WI. 10,000+ item catalog. Installed and uninstalled in 13 min. Wanted bulk color identification. ChatGPT recommended the app. Didn't realize it extracts color. Sent win-back email from marco.a.duval@gmail.com (Mar 19, 2026) explaining color extraction workflow and offering 50-item free test. |

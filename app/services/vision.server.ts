@@ -35,6 +35,16 @@ export interface VisionError {
 
 export type VisionResponse = VisionResult | VisionError;
 
+// Maps shop language codes to the full names used in the vision prompt
+export const LANGUAGE_NAMES: Record<string, string> = {
+  en: "English", pt: "Portuguese", es: "Spanish", fr: "French",
+  de: "German", it: "Italian", nl: "Dutch", ja: "Japanese",
+  ko: "Korean", zh: "Chinese", ar: "Arabic", ru: "Russian",
+  tr: "Turkish", pl: "Polish", sv: "Swedish", da: "Danish",
+  fi: "Finnish", nb: "Norwegian", cs: "Czech", ro: "Romanian",
+  hu: "Hungarian", th: "Thai", vi: "Vietnamese", he: "Hebrew",
+};
+
 /**
  * Strip markdown code blocks from Claude's response
  * Claude sometimes wraps JSON in ```json ... ``` despite instructions

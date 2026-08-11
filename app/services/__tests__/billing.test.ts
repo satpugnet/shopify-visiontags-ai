@@ -27,8 +27,9 @@ import {
   hasAvailableCredits,
   consumeCredits,
   resetCredits,
-  upgradeToProPlan,
-  downgradeToFreePlan,
+  setPlan,
+  resolvePlanFromSubscriptionName,
+  resolvePlanFromSubscriptions,
   toggleAutoSync,
   syncPlanFromShopify,
 } from "../billing.server";
@@ -126,9 +127,42 @@ describe("PLANS configuration", () => {
     });
   });
 
+  describe("SCALE plan", () => {
+    it("should have correct credit limit (15000)", () => {
+      expect(PLANS.SCALE.credits).toBe(15000);
+    });
+
+    it("should cost $79/month", () => {
+      expect(PLANS.SCALE.price).toBe(79);
+    });
+
+    it("should allow 2,000 products per scan", () => {
+      expect(PLANS.SCALE.scanLimit).toBe(2000);
+    });
+
+    it("should have all scale features", () => {
+      expect(PLANS.SCALE.features).toContain("15,000 AI scans/month");
+      expect(PLANS.SCALE.features).toContain("2,000 products per scan");
+      expect(PLANS.SCALE.features).toContain("Auto-sync new products");
+      expect(PLANS.SCALE.features).toContain("Priority support");
+    });
+  });
+
+  describe("Per-plan scan limits", () => {
+    it("should cap scans per run by plan", () => {
+      expect(PLANS.FREE.scanLimit).toBe(50);
+      expect(PLANS.PRO.scanLimit).toBe(500);
+      expect(PLANS.SCALE.scanLimit).toBe(2000);
+    });
+  });
+
   describe("Plan comparison", () => {
     it("PRO should have more credits than FREE", () => {
       expect(PLANS.PRO.credits).toBeGreaterThan(PLANS.FREE.credits);
+    });
+
+    it("SCALE should have more credits than PRO", () => {
+      expect(PLANS.SCALE.credits).toBeGreaterThan(PLANS.PRO.credits);
     });
 
     it("PRO should have more features than FREE", () => {
@@ -136,6 +170,62 @@ describe("PLANS configuration", () => {
         PLANS.FREE.features.length
       );
     });
+  });
+});
+
+describe("resolvePlanFromSubscriptionName", () => {
+  it("should resolve 'Scale' to SCALE (case/whitespace insensitive)", () => {
+    expect(resolvePlanFromSubscriptionName("Scale")).toBe("SCALE");
+    expect(resolvePlanFromSubscriptionName("scale")).toBe("SCALE");
+    expect(resolvePlanFromSubscriptionName(" Scale ")).toBe("SCALE");
+  });
+
+  it("should resolve 'Free' and empty names to FREE", () => {
+    expect(resolvePlanFromSubscriptionName("Free")).toBe("FREE");
+    expect(resolvePlanFromSubscriptionName("free")).toBe("FREE");
+    expect(resolvePlanFromSubscriptionName("")).toBe("FREE");
+    expect(resolvePlanFromSubscriptionName(null)).toBe("FREE");
+    expect(resolvePlanFromSubscriptionName(undefined)).toBe("FREE");
+  });
+
+  it("should resolve 'Pro' to PRO", () => {
+    expect(resolvePlanFromSubscriptionName("Pro")).toBe("PRO");
+    expect(resolvePlanFromSubscriptionName("pro")).toBe("PRO");
+  });
+
+  it("should fall back to PRO for unrecognized paid plan names", () => {
+    expect(resolvePlanFromSubscriptionName("Enterprise")).toBe("PRO");
+    expect(resolvePlanFromSubscriptionName("Pro Annual")).toBe("PRO");
+  });
+});
+
+describe("resolvePlanFromSubscriptions", () => {
+  it("should return FREE for no subscriptions", () => {
+    expect(resolvePlanFromSubscriptions([])).toBe("FREE");
+  });
+
+  it("should ignore non-ACTIVE subscriptions", () => {
+    expect(
+      resolvePlanFromSubscriptions([
+        { name: "Pro", status: "CANCELLED" },
+        { name: "Scale", status: "EXPIRED" },
+      ])
+    ).toBe("FREE");
+  });
+
+  it("should pick the highest-ranked plan among simultaneous active subs", () => {
+    expect(
+      resolvePlanFromSubscriptions([
+        { name: "Pro", status: "ACTIVE" },
+        { name: "Scale", status: "ACTIVE" },
+      ])
+    ).toBe("SCALE");
+  });
+
+  it("should resolve a single active Pro sub to PRO", () => {
+    expect(
+      resolvePlanFromSubscriptions([{ name: "Pro", status: "ACTIVE" }])
+    ).toBe("PRO");
   });
 });
 
@@ -428,12 +518,12 @@ describe("resetCredits (integration)", () => {
   });
 });
 
-describe("upgradeToProPlan (integration)", () => {
-  it("should update plan and reset credits", async () => {
+describe("setPlan (integration)", () => {
+  it("should reset credits and billing period on upgrade (FREE → PRO)", async () => {
     prismaMock.shopSettings.findUnique.mockResolvedValue(freeShopSettings as any);
     prismaMock.shopSettings.update.mockResolvedValue({} as any);
 
-    await upgradeToProPlan("test-shop.myshopify.com");
+    await setPlan("test-shop.myshopify.com", "PRO");
 
     expect(prismaMock.shopSettings.update).toHaveBeenCalledWith({
       where: { shop: "test-shop.myshopify.com" },
@@ -446,21 +536,28 @@ describe("upgradeToProPlan (integration)", () => {
     });
   });
 
-  it("should no-op when already on PRO", async () => {
-    prismaMock.shopSettings.findUnique.mockResolvedValue(proShopSettings as any);
-
-    await upgradeToProPlan("pro-shop.myshopify.com");
-
-    expect(prismaMock.shopSettings.update).not.toHaveBeenCalled();
-  });
-});
-
-describe("downgradeToFreePlan (integration)", () => {
-  it("should update plan and disable auto-sync", async () => {
+  it("should reset credits and billing period on upgrade (PRO → SCALE)", async () => {
     prismaMock.shopSettings.findUnique.mockResolvedValue(proShopSettings as any);
     prismaMock.shopSettings.update.mockResolvedValue({} as any);
 
-    await downgradeToFreePlan("pro-shop.myshopify.com");
+    await setPlan("pro-shop.myshopify.com", "SCALE");
+
+    expect(prismaMock.shopSettings.update).toHaveBeenCalledWith({
+      where: { shop: "pro-shop.myshopify.com" },
+      data: {
+        plan: "SCALE",
+        creditLimit: 15000,
+        creditsUsed: 0,
+        billingPeriodStart: expect.any(Date),
+      },
+    });
+  });
+
+  it("should keep creditsUsed on downgrade and disable auto-sync only on FREE", async () => {
+    prismaMock.shopSettings.findUnique.mockResolvedValue(proShopSettings as any);
+    prismaMock.shopSettings.update.mockResolvedValue({} as any);
+
+    await setPlan("pro-shop.myshopify.com", "FREE");
 
     expect(prismaMock.shopSettings.update).toHaveBeenCalledWith({
       where: { shop: "pro-shop.myshopify.com" },
@@ -472,12 +569,47 @@ describe("downgradeToFreePlan (integration)", () => {
     });
   });
 
-  it("should no-op when already on FREE", async () => {
-    prismaMock.shopSettings.findUnique.mockResolvedValue(freeShopSettings as any);
+  it("should keep creditsUsed and auto-sync on paid downgrade (SCALE → PRO)", async () => {
+    prismaMock.shopSettings.findUnique.mockResolvedValue({
+      ...proShopSettings,
+      plan: "SCALE",
+      creditLimit: 15000,
+      creditsUsed: 12000,
+    } as any);
+    prismaMock.shopSettings.update.mockResolvedValue({} as any);
 
-    await downgradeToFreePlan("test-shop.myshopify.com");
+    await setPlan("pro-shop.myshopify.com", "PRO");
+
+    expect(prismaMock.shopSettings.update).toHaveBeenCalledWith({
+      where: { shop: "pro-shop.myshopify.com" },
+      data: {
+        plan: "PRO",
+        creditLimit: 5000,
+      },
+    });
+  });
+
+  it("should no-op when already on target plan (duplicate webhook safety)", async () => {
+    prismaMock.shopSettings.findUnique.mockResolvedValue(proShopSettings as any);
+
+    await setPlan("pro-shop.myshopify.com", "PRO");
 
     expect(prismaMock.shopSettings.update).not.toHaveBeenCalled();
+  });
+
+  it("should sync creditLimit without resetting credits when already on plan but config changed", async () => {
+    prismaMock.shopSettings.findUnique.mockResolvedValue({
+      ...proShopSettings,
+      creditLimit: 4000, // stale config
+    } as any);
+    prismaMock.shopSettings.update.mockResolvedValue({} as any);
+
+    await setPlan("pro-shop.myshopify.com", "PRO");
+
+    expect(prismaMock.shopSettings.update).toHaveBeenCalledWith({
+      where: { shop: "pro-shop.myshopify.com" },
+      data: { creditLimit: 5000 },
+    });
   });
 });
 
@@ -498,7 +630,7 @@ describe("toggleAutoSync (integration)", () => {
     const result = await toggleAutoSync("test-shop.myshopify.com", true);
 
     expect(result.success).toBe(false);
-    expect(result.error).toBe("Auto-sync is only available on Pro plan");
+    expect(result.error).toBe("Auto-sync is only available on paid plans");
   });
 
   it("should allow any plan to disable auto-sync", async () => {
@@ -542,6 +674,28 @@ describe("syncPlanFromShopify (integration)", () => {
       data: {
         plan: "PRO",
         creditLimit: 5000,
+        creditsUsed: 0,
+        billingPeriodStart: expect.any(Date),
+      },
+    });
+  });
+
+  it("should upgrade to SCALE when active Scale subscription exists", async () => {
+    const mockAdmin = createMockAdmin([
+      { id: "gid://shopify/AppSubscription/2", name: "Scale", status: "ACTIVE" },
+    ]);
+    prismaMock.shopSettings.findUnique.mockResolvedValue(proShopSettings as any);
+    prismaMock.shopSettings.update.mockResolvedValue({} as any);
+
+    const result = await syncPlanFromShopify(mockAdmin, "pro-shop.myshopify.com");
+
+    expect(result.plan).toBe("SCALE");
+    expect(result.synced).toBe(true);
+    expect(prismaMock.shopSettings.update).toHaveBeenCalledWith({
+      where: { shop: "pro-shop.myshopify.com" },
+      data: {
+        plan: "SCALE",
+        creditLimit: 15000,
         creditsUsed: 0,
         billingPeriodStart: expect.any(Date),
       },

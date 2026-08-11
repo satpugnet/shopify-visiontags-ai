@@ -58,6 +58,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       logger.info("PRODUCT_RECORDS_DELETED", { shop, productId, count: deleted.count });
     }
 
+    // Remove from the cross-run scan ledger so progress counts stay honest
+    await prisma.scannedProduct.deleteMany({
+      where: { shop, productId },
+    });
+
     return new Response();
   } catch (error) {
     logger.error("WEBHOOK_ERROR", {

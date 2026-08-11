@@ -6,6 +6,9 @@ const mocks = vi.hoisted(() => ({
     product: {
       deleteMany: vi.fn(),
     },
+    scannedProduct: {
+      deleteMany: vi.fn(),
+    },
   },
   authenticate: {
     webhook: vi.fn(),
@@ -61,6 +64,12 @@ describe("webhooks.products.delete", () => {
         job: {
           shop: "test-shop.myshopify.com",
         },
+      },
+    });
+    expect(mocks.prisma.scannedProduct.deleteMany).toHaveBeenCalledWith({
+      where: {
+        shop: "test-shop.myshopify.com",
+        productId: "gid://shopify/Product/123456789",
       },
     });
   });

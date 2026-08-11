@@ -124,6 +124,10 @@ async function handleShopRedact(shop: string): Promise<Response> {
       where: { shop },
     });
 
+    const deletedScanned = await db.scannedProduct.deleteMany({
+      where: { shop },
+    });
+
     const deletedSettings = await db.shopSettings.deleteMany({
       where: { shop },
     });
@@ -137,6 +141,7 @@ async function handleShopRedact(shop: string): Promise<Response> {
       products: deletedProducts.count,
       jobs: deletedJobs.count,
       usage: deletedUsage.count,
+      scanned: deletedScanned.count,
       settings: deletedSettings.count,
       sessions: deletedSessions.count,
     });

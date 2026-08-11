@@ -17,6 +17,7 @@ import {
   DataTable,
   EmptyState,
   Select,
+  Checkbox,
 } from "@shopify/polaris";
 import { TitleBar, useAppBridge } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
@@ -90,6 +91,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   // Get billing info
   const billing = await getShopBilling(shop);
+
+  // Cross-run backfill progress from the scan ledger
+  const scannedCount = await prisma.scannedProduct.count({ where: { shop } });
 
   // Get plan picker URL for upgrade buttons
   const planPickerUrl = getPlanPickerUrl(shop);
@@ -165,6 +169,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   return json({
     shop,
     productCount,
+    scannedCount,
     billing,
     proFeatures: PLANS.PRO.features,
     proPrice: PLANS.PRO.price,
@@ -234,23 +239,67 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     // Get selected collection (if any)
     const selectedCollection = formData.get("selectedCollection") as string;
+    const includeScanned = formData.get("includeScanned") === "true";
 
-    // Fetch products with images (limit based on plan)
+    // Cap the run at plan limit AND remaining credits, and bail out before
+    // any fetching when there is nothing left to spend.
     const billing = await getShopBilling(shop);
-    const scanLimit = billing.plan === "PRO" ? 500 : 50;
+    const effectiveLimit = Math.min(
+      PLANS[billing.plan].scanLimit,
+      billing.creditsRemaining
+    );
+
+    if (effectiveLimit === 0) {
+      logger.warn("SCAN_BLOCKED_NO_CREDITS", {
+        shop,
+        remaining: 0,
+        plan: billing.plan,
+      });
+      const errorMessage = billing.plan === "FREE"
+        ? "Not enough credits. Upgrade to Pro for 5,000 credits/month."
+        : "Not enough credits. Credits will reset at the start of your next billing cycle.";
+      return json({
+        error: errorMessage,
+        success: false,
+      });
+    }
+
+    // Cross-run dedup: skip products already successfully analyzed,
+    // unless the merchant explicitly asked to rescan them.
+    let excludeIds: Set<string> | undefined;
+    if (!includeScanned) {
+      const scanned = await prisma.scannedProduct.findMany({
+        where: { shop },
+        select: { productId: true },
+      });
+      if (scanned.length > 0) {
+        excludeIds = new Set(scanned.map((s) => s.productId));
+      }
+    }
+
     const products = selectedCollection && selectedCollection !== "all"
-      ? await fetchCollectionProducts(admin, selectedCollection, scanLimit)
-      : await fetchAllProducts(admin, scanLimit);
+      ? await fetchCollectionProducts(admin, selectedCollection, effectiveLimit, { excludeIds })
+      : await fetchAllProducts(admin, effectiveLimit, { excludeIds });
 
     const collection = selectedCollection && selectedCollection !== "all" ? selectedCollection : "all";
     logger.info("SCAN_PRODUCTS_FETCHED", {
       shop,
       productCount: products.length,
-      scanLimit,
+      effectiveLimit,
       collection,
+      includeScanned,
+      skippedScanned: excludeIds?.size ?? 0,
     });
 
     if (products.length === 0) {
+      if (excludeIds && excludeIds.size > 0) {
+        logger.info("SCAN_BLOCKED_ALL_SCANNED", { shop, scannedCount: excludeIds.size });
+        return json({
+          error:
+            'All products in this selection have already been scanned. Tick "Include already-scanned products" to rescan them.',
+          success: false,
+        });
+      }
       logger.info("SCAN_BLOCKED_NO_PRODUCTS", { shop });
       return json({
         error: "No products with images found",
@@ -318,16 +367,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     // Map language codes to full names for the prompt
-    const languageNames: Record<string, string> = {
-      en: "English", pt: "Portuguese", es: "Spanish", fr: "French",
-      de: "German", it: "Italian", nl: "Dutch", ja: "Japanese",
-      ko: "Korean", zh: "Chinese", ar: "Arabic", ru: "Russian",
-      tr: "Turkish", pl: "Polish", sv: "Swedish", da: "Danish",
-      fi: "Finnish", nb: "Norwegian", cs: "Czech", ro: "Romanian",
-      hu: "Hungarian", th: "Thai", vi: "Vietnamese", he: "Hebrew",
-    };
+    const { LANGUAGE_NAMES } = await import("../services/vision.server");
     const languageForPrompt = resolvedLanguage
-      ? languageNames[resolvedLanguage] || resolvedLanguage
+      ? LANGUAGE_NAMES[resolvedLanguage] || resolvedLanguage
       : undefined;
 
     // Check credits
@@ -353,6 +395,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const job = await prisma.job.create({
       data: {
         shop,
+        collectionId: selectedCollection && selectedCollection !== "all" ? selectedCollection : null,
         status: "QUEUED",
         totalItems: products.length,
         industry: industryId,
@@ -469,7 +512,7 @@ function relativeTime(dateStr: string): string {
 }
 
 export default function Dashboard() {
-  const { productCount, billing, jobs, proFeatures, proPrice, planPickerUrl, collections, pendingSyncCount, recentJobId, language } = useLoaderData<typeof loader>();
+  const { productCount, scannedCount, billing, jobs, proFeatures, proPrice, planPickerUrl, collections, pendingSyncCount, recentJobId, language } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<ActionData>();
   const languageFetcher = useFetcher();
   const shopify = useAppBridge();
@@ -477,6 +520,7 @@ export default function Dashboard() {
   const revalidator = useRevalidator();
   const [selectedCollection, setSelectedCollection] = useState("all");
   const [selectedLanguage, setSelectedLanguage] = useState(language);
+  const [includeScanned, setIncludeScanned] = useState(false);
 
   const isScanning =
     fetcher.state === "submitting" && fetcher.formData?.get("action") === "start-scan";
@@ -508,7 +552,11 @@ export default function Dashboard() {
 
   const startScan = () => {
     fetcher.submit(
-      { action: "start-scan", selectedCollection },
+      {
+        action: "start-scan",
+        selectedCollection,
+        includeScanned: includeScanned ? "true" : "false",
+      },
       { method: "POST" }
     );
   };
@@ -599,7 +647,7 @@ export default function Dashboard() {
                   <Text as="h2" variant="headingMd">
                     Your Store
                   </Text>
-                  <Badge tone={billing.plan === "PRO" ? "success" : "info"}>
+                  <Badge tone={billing.plan !== "FREE" ? "success" : "info"}>
                     {`${billing.plan} Plan`}
                   </Badge>
                 </InlineStack>
@@ -613,6 +661,28 @@ export default function Dashboard() {
                       {productCount}
                     </Text>
                   </InlineStack>
+
+                  <InlineStack align="space-between">
+                    <Text as="span" variant="bodyMd">
+                      Products scanned
+                    </Text>
+                    <Text as="span" variant="bodyMd" fontWeight="semibold">
+                      {Math.min(scannedCount, productCount)} / {productCount}
+                    </Text>
+                  </InlineStack>
+
+                  {productCount > 0 && (
+                    <Box>
+                      <ProgressBar
+                        progress={Math.min(
+                          100,
+                          Math.round((scannedCount / productCount) * 100)
+                        )}
+                        tone="success"
+                        size="small"
+                      />
+                    </Box>
+                  )}
 
                   <InlineStack align="space-between">
                     <Text as="span" variant="bodyMd">
@@ -637,6 +707,13 @@ export default function Dashboard() {
                   options={collectionOptions}
                   value={selectedCollection}
                   onChange={setSelectedCollection}
+                />
+
+                <Checkbox
+                  label="Include already-scanned products (uses credits)"
+                  helpText="Scans normally skip products that were already processed, so repeated runs work through your catalog without double-charging."
+                  checked={includeScanned}
+                  onChange={setIncludeScanned}
                 />
 
                 <Select

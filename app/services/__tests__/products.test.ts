@@ -701,3 +701,135 @@ describe("fetchCollectionProducts", () => {
     expect(products).toHaveLength(0);
   });
 });
+
+// ==================================
+// extractProductGid
+// ==================================
+
+describe("extractProductGid", () => {
+  it("should return bare GIDs unchanged", async () => {
+    const { extractProductGid } = await import("../products.server");
+    expect(extractProductGid("gid://shopify/Product/123")).toBe(
+      "gid://shopify/Product/123"
+    );
+  });
+
+  it("should strip the UUID suffix from webhook-created row IDs", async () => {
+    const { extractProductGid } = await import("../products.server");
+    expect(
+      extractProductGid(
+        "gid://shopify/Product/123-dcf307b2-1234-5678-9abc-def012345678"
+      )
+    ).toBe("gid://shopify/Product/123");
+  });
+
+  it("should return null for non-product IDs", async () => {
+    const { extractProductGid } = await import("../products.server");
+    expect(extractProductGid("gid://shopify/Collection/123")).toBeNull();
+    expect(extractProductGid("not-a-gid")).toBeNull();
+    expect(extractProductGid("")).toBeNull();
+  });
+});
+
+// ==================================
+// excludeIds pagination (skip-already-scanned)
+// ==================================
+
+describe("fetchAllProducts with excludeIds", () => {
+  function makePage(ids: number[], hasNextPage: boolean) {
+    return {
+      data: {
+        products: {
+          edges: ids.map((id) => ({
+            cursor: `cursor${id}`,
+            node: {
+              id: `gid://shopify/Product/${id}`,
+              title: `Product ${id}`,
+              vendor: "TestBrand",
+              featuredImage: { url: `https://cdn.shopify.com/${id}.jpg` },
+              productType: "Apparel",
+              tags: [],
+              category: null,
+            },
+          })),
+          pageInfo: { hasNextPage },
+        },
+      },
+    };
+  }
+
+  function createMockAdmin(responses: Array<unknown>) {
+    let callIndex = 0;
+    return {
+      graphql: vi.fn().mockImplementation(() => ({
+        json: async () =>
+          responses[callIndex++] || responses[responses.length - 1],
+      })),
+    };
+  }
+
+  it("should skip excluded products", async () => {
+    const admin = createMockAdmin([makePage([1, 2, 3], false)]);
+    const { fetchAllProducts } = await import("../products.server");
+
+    const products = await fetchAllProducts(admin as any, 10, {
+      excludeIds: new Set(["gid://shopify/Product/2"]),
+    });
+
+    expect(products.map((p) => p.id)).toEqual([
+      "gid://shopify/Product/1",
+      "gid://shopify/Product/3",
+    ]);
+  });
+
+  it("should keep paginating past fully-excluded pages until limit is reached", async () => {
+    const admin = createMockAdmin([
+      makePage([1, 2], true),
+      makePage([3, 4], false),
+    ]);
+    const { fetchAllProducts } = await import("../products.server");
+
+    const products = await fetchAllProducts(admin as any, 2, {
+      excludeIds: new Set([
+        "gid://shopify/Product/1",
+        "gid://shopify/Product/2",
+      ]),
+    });
+
+    // First page contributes nothing; loop must continue to page 2
+    expect(admin.graphql).toHaveBeenCalledTimes(2);
+    expect(products.map((p) => p.id)).toEqual([
+      "gid://shopify/Product/3",
+      "gid://shopify/Product/4",
+    ]);
+  });
+
+  it("should return empty when everything is excluded and catalog is exhausted", async () => {
+    const admin = createMockAdmin([makePage([1, 2], false)]);
+    const { fetchAllProducts } = await import("../products.server");
+
+    const products = await fetchAllProducts(admin as any, 10, {
+      excludeIds: new Set([
+        "gid://shopify/Product/1",
+        "gid://shopify/Product/2",
+      ]),
+    });
+
+    expect(products).toHaveLength(0);
+  });
+
+  it("should stop at the limit even when more non-excluded products exist", async () => {
+    const admin = createMockAdmin([makePage([1, 2, 3, 4], true)]);
+    const { fetchAllProducts } = await import("../products.server");
+
+    const products = await fetchAllProducts(admin as any, 2, {
+      excludeIds: new Set(["gid://shopify/Product/1"]),
+    });
+
+    expect(products.map((p) => p.id)).toEqual([
+      "gid://shopify/Product/2",
+      "gid://shopify/Product/3",
+    ]);
+    expect(admin.graphql).toHaveBeenCalledTimes(1);
+  });
+});

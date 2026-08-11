@@ -11,19 +11,37 @@ import { logger } from "./logger.server";
 // Using Claude Haiku 4.5: ~$0.003/scan
 // Free: 50 scans = ~$0.15 cost (acquisition cost)
 // Pro: 5,000 scans = ~$15 cost, $19 revenue = $4 profit (21% margin)
+// Scale: 15,000 scans = ~$45-60 cost worst case, $79 revenue (thin if maxed; typical usage is partial)
 export const PLANS = {
   FREE: {
     name: "Free",
     credits: 50,
     price: 0,
+    scanLimit: 50,
     features: ["50 AI scans/month", "Basic metafields", "Basic tags", "AI descriptions"],
   },
   PRO: {
     name: "Pro",
     credits: 5000,
     price: 19,
+    scanLimit: 500,
     features: [
       "5,000 AI scans/month",
+      "All metafields",
+      "SEO tags",
+      "AI product descriptions & SEO",
+      "Auto-sync new products",
+      "Priority support",
+    ],
+  },
+  SCALE: {
+    name: "Scale",
+    credits: 15000,
+    price: 79,
+    scanLimit: 2000,
+    features: [
+      "15,000 AI scans/month",
+      "2,000 products per scan",
       "All metafields",
       "SEO tags",
       "AI product descriptions & SEO",
@@ -34,6 +52,44 @@ export const PLANS = {
 } as const;
 
 export type PlanType = keyof typeof PLANS;
+
+// Rank used to resolve the effective plan when duplicate/out-of-order webhooks
+// briefly report old and new subscriptions as simultaneously active.
+const PLAN_RANK: Record<PlanType, number> = { FREE: 0, PRO: 1, SCALE: 2 };
+
+/**
+ * Map a Shopify subscription name to a plan.
+ * The Managed Pricing plan Display Names are a contract: "Free", "Pro", "Scale".
+ * Unknown paid names fall back to PRO so a renamed Partner Dashboard plan
+ * degrades gracefully instead of locking merchants out.
+ */
+export function resolvePlanFromSubscriptionName(
+  name: string | null | undefined
+): PlanType {
+  const normalized = (name || "").trim().toLowerCase();
+  if (normalized === "scale") return "SCALE";
+  if (normalized === "" || normalized === "free") return "FREE";
+  if (normalized !== "pro") {
+    logger.warn("PLAN_NAME_UNRECOGNIZED", { name: name || "", resolvedTo: "PRO" });
+  }
+  return "PRO";
+}
+
+/**
+ * Resolve the effective plan from a shop's active subscriptions,
+ * picking the highest-ranked plan among ACTIVE ones.
+ */
+export function resolvePlanFromSubscriptions(
+  subscriptions: Array<{ name: string; status: string }>
+): PlanType {
+  return subscriptions
+    .filter((sub) => sub.status === "ACTIVE")
+    .map((sub) => resolvePlanFromSubscriptionName(sub.name))
+    .reduce<PlanType>(
+      (best, plan) => (PLAN_RANK[plan] > PLAN_RANK[best] ? plan : best),
+      "FREE"
+    );
+}
 
 export interface ShopBilling {
   plan: PlanType;
@@ -179,74 +235,48 @@ export async function resetCredits(shop: string): Promise<void> {
 }
 
 /**
- * Upgrade shop to Pro plan.
- * Guarded: no-ops if already on PRO to prevent resetting credits on duplicate webhook calls.
+ * Set the shop's plan. Guarded for idempotency so duplicate webhook calls are safe:
+ * - Same plan: no-op except syncing creditLimit to config (handles plan config changes).
+ * - Upgrade (rank up): fresh credits and billing period.
+ * - Downgrade (rank down): keeps creditsUsed/billingPeriodStart until the period resets;
+ *   auto-sync is disabled only when landing on FREE.
  */
-export async function upgradeToProPlan(shop: string): Promise<void> {
+export async function setPlan(shop: string, plan: PlanType): Promise<void> {
   const settings = await getOrCreateShopSettings(shop);
+  const currentPlan = settings.plan as PlanType;
+  const planCredits = PLANS[plan].credits;
 
-  if (settings.plan === "PRO") {
+  if (currentPlan === plan) {
     logger.info("PLAN_SYNC_SKIPPED", {
       shop,
-      plan: "PRO",
-      reason: "already_on_pro",
+      plan,
+      reason: "already_on_plan",
       creditsUsed: settings.creditsUsed,
     });
     // Ensure creditLimit matches config (handles plan config changes)
-    if (settings.creditLimit !== PLANS.PRO.credits) {
+    if (settings.creditLimit !== planCredits) {
       await prisma.shopSettings.update({
         where: { shop },
-        data: { creditLimit: PLANS.PRO.credits },
+        data: { creditLimit: planCredits },
       });
     }
     return;
   }
 
+  const isUpgrade = PLAN_RANK[plan] > PLAN_RANK[currentPlan];
   logger.info("PLAN_CHANGED", {
     shop,
-    from: settings.plan,
-    to: "PRO",
-    creditLimit: PLANS.PRO.credits,
+    from: currentPlan,
+    to: plan,
+    creditLimit: planCredits,
   });
   await prisma.shopSettings.update({
     where: { shop },
     data: {
-      plan: "PRO",
-      creditLimit: PLANS.PRO.credits,
-      creditsUsed: 0,
-      billingPeriodStart: new Date(),
-    },
-  });
-}
-
-/**
- * Downgrade shop to Free plan.
- * Guarded: no-ops if already on FREE.
- */
-export async function downgradeToFreePlan(shop: string): Promise<void> {
-  const settings = await getOrCreateShopSettings(shop);
-
-  if (settings.plan === "FREE") {
-    logger.info("PLAN_SYNC_SKIPPED", {
-      shop,
-      plan: "FREE",
-      reason: "already_on_free",
-    });
-    return;
-  }
-
-  logger.info("PLAN_CHANGED", {
-    shop,
-    from: settings.plan,
-    to: "FREE",
-    creditLimit: PLANS.FREE.credits,
-  });
-  await prisma.shopSettings.update({
-    where: { shop },
-    data: {
-      plan: "FREE",
-      creditLimit: PLANS.FREE.credits,
-      autoSyncNewProducts: false, // Disable auto-sync on downgrade
+      plan,
+      creditLimit: planCredits,
+      ...(isUpgrade ? { creditsUsed: 0, billingPeriodStart: new Date() } : {}),
+      ...(plan === "FREE" ? { autoSyncNewProducts: false } : {}),
     },
   });
 }
@@ -263,7 +293,7 @@ export async function toggleAutoSync(
   if (settings.plan === "FREE" && enabled) {
     return {
       success: false,
-      error: "Auto-sync is only available on Pro plan",
+      error: "Auto-sync is only available on paid plans",
     };
   }
 
@@ -302,26 +332,20 @@ export async function syncPlanFromShopify(
     const subscriptions =
       data.data?.currentAppInstallation?.activeSubscriptions || [];
 
-    const hasActive = subscriptions.some(
-      (sub: { status: string; name: string }) =>
-        sub.status === "ACTIVE" && sub.name !== "Free"
-    );
+    const targetPlan = resolvePlanFromSubscriptions(subscriptions);
 
     logger.info("PLAN_SYNC_CHECK", {
       shop,
       subscriptions: JSON.stringify(subscriptions),
-      hasActive,
+      targetPlan,
     });
 
     const settings = await getOrCreateShopSettings(shop);
     const currentPlan = settings.plan as PlanType;
 
-    if (hasActive && currentPlan !== "PRO") {
-      await upgradeToProPlan(shop);
-      return { plan: "PRO", synced: true };
-    } else if (!hasActive && currentPlan !== "FREE") {
-      await downgradeToFreePlan(shop);
-      return { plan: "FREE", synced: true };
+    if (targetPlan !== currentPlan) {
+      await setPlan(shop, targetPlan);
+      return { plan: targetPlan, synced: true };
     }
 
     return { plan: currentPlan, synced: false };

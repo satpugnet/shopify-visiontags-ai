@@ -6,6 +6,7 @@
 import { Queue, Worker, type Job as BullJob } from "bullmq";
 import * as Sentry from "@sentry/remix";
 import { analyzeProductImage, isVisionError } from "./vision.server";
+import { extractProductGid } from "./products.server";
 import { logger } from "./logger.server";
 import prisma from "../db.server";
 
@@ -103,7 +104,10 @@ export async function queueProductAnalysis(
 }
 
 /**
- * Add multiple products to the analysis queue
+ * Add multiple products to the analysis queue.
+ * options.bullJobIdSuffix makes re-queues (e.g. retry-failed) use fresh BullMQ
+ * job IDs — originals may linger in Redis (removeOnComplete/removeOnFail keep
+ * recent ones) and BullMQ silently drops duplicate custom IDs.
  */
 export async function queueBulkAnalysis(
   jobId: string,
@@ -112,6 +116,7 @@ export async function queueBulkAnalysis(
   industryId?: string,
   language?: string,
   storeName?: string,
+  options?: { bullJobIdSuffix?: string },
 ): Promise<void> {
   const queue = getAnalysisQueue();
 
@@ -131,7 +136,9 @@ export async function queueBulkAnalysis(
         storeName,
       },
       opts: {
-        jobId: `${jobId}-${sanitizedProductId}`,
+        jobId: options?.bullJobIdSuffix
+          ? `${jobId}-${sanitizedProductId}-${options.bullJobIdSuffix}`
+          : `${jobId}-${sanitizedProductId}`,
       },
     };
   });
@@ -252,6 +259,29 @@ export function startAnalysisWorker(): Worker<AnalysisJobData> {
                 suggestedMetaDescription: result.meta_description,
               },
             });
+
+            // Record in the cross-run scan ledger so future scans skip this
+            // product. Ledger keys on the bare GID (webhook rows are suffixed).
+            // Best-effort: a ledger failure must never fail the analysis.
+            try {
+              const bareGid = extractProductGid(productId);
+              if (bareGid) {
+                await prisma.scannedProduct.upsert({
+                  where: { shop_productId: { shop, productId: bareGid } },
+                  create: { shop, productId: bareGid, imageUrl },
+                  update: { imageUrl, scannedAt: new Date() },
+                });
+              }
+            } catch (ledgerError) {
+              logger.warn("LEDGER_UPSERT_FAILED", {
+                shop,
+                productId,
+                error:
+                  ledgerError instanceof Error
+                    ? ledgerError.message
+                    : String(ledgerError),
+              });
+            }
           }
         } catch (updateError) {
           // Product was deleted between our check and the update (P2025)
@@ -267,16 +297,16 @@ export function startAnalysisWorker(): Worker<AnalysisJobData> {
           throw updateError;
         }
 
-        // Update job progress
+        // Update job progress (count query instead of loading all product rows —
+        // matters at 2,000-product Scale runs)
         const jobRecord = await prisma.job.findUnique({
           where: { id: jobId },
-          include: { products: true },
         });
 
         if (jobRecord) {
-          const processed = jobRecord.products.filter(
-            (p) => p.status !== "PENDING"
-          ).length;
+          const processed = await prisma.product.count({
+            where: { jobId, status: { not: "PENDING" } },
+          });
 
           const newStatus = processed >= jobRecord.totalItems ? "COMPLETED" : "PROCESSING";
           await prisma.job.update({

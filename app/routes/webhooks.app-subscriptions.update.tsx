@@ -2,8 +2,9 @@ import type { ActionFunctionArgs } from "@remix-run/node";
 import * as Sentry from "@sentry/remix";
 import { authenticate, unauthenticated } from "../shopify.server";
 import {
-  upgradeToProPlan,
-  downgradeToFreePlan,
+  setPlan,
+  resolvePlanFromSubscriptions,
+  resolvePlanFromSubscriptionName,
 } from "../services/billing.server";
 import { logger } from "../services/logger.server";
 
@@ -62,22 +63,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const data = await response.json();
     const subscriptions =
       data.data?.currentAppInstallation?.activeSubscriptions || [];
-    const hasActive = subscriptions.some(
-      (sub: { status: string; name: string }) =>
-        sub.status === "ACTIVE" && sub.name !== "Free"
-    );
+    const targetPlan = resolvePlanFromSubscriptions(subscriptions);
 
     logger.info("SUBSCRIPTION_VERIFIED", {
       shop,
       subscriptionCount: subscriptions.length,
-      hasActive,
+      targetPlan,
     });
 
-    if (hasActive) {
-      await upgradeToProPlan(shop);
-    } else {
-      await downgradeToFreePlan(shop);
-    }
+    await setPlan(shop, targetPlan);
   } catch (error) {
     // If we can't query Shopify (e.g., token expired), fall back to webhook payload
     logger.error("SUBSCRIPTION_VERIFY_FAILED", {
@@ -89,10 +83,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       tags: { service: "webhook", topic, shop },
     });
 
-    if (status === "ACTIVE" && name !== "Free") {
-      await upgradeToProPlan(shop);
+    if (status === "ACTIVE") {
+      await setPlan(shop, resolvePlanFromSubscriptionName(name));
     } else if (status === "CANCELLED" || status === "EXPIRED" || status === "DECLINED") {
-      await downgradeToFreePlan(shop);
+      await setPlan(shop, "FREE");
     }
   }
 

@@ -85,7 +85,7 @@ export default function Billing() {
               <Text as="h2" variant="headingMd">
                 Current Plan
               </Text>
-              <Badge tone={billing.plan === "PRO" ? "success" : "info"}>
+              <Badge tone={billing.plan !== "FREE" ? "success" : "info"}>
                 {billing.plan}
               </Badge>
             </InlineStack>
@@ -139,74 +139,44 @@ export default function Billing() {
 
         {/* Plan Comparison */}
         <Layout>
-          <Layout.Section variant="oneHalf">
-            <Card>
-              <BlockStack gap="400">
-                <InlineStack align="space-between">
-                  <Text as="h2" variant="headingMd">
-                    Free Plan
-                  </Text>
-                  <Text as="span" variant="headingLg">
-                    $0
-                  </Text>
-                </InlineStack>
+          {(["FREE", "PRO", "SCALE"] as const).map((planKey) => (
+            <Layout.Section key={planKey} variant="oneThird">
+              <Card>
+                <BlockStack gap="400">
+                  <InlineStack align="space-between">
+                    <Text as="h2" variant="headingMd">
+                      {plans[planKey].name} Plan
+                    </Text>
+                    <Text as="span" variant="headingLg">
+                      {plans[planKey].price === 0
+                        ? "$0"
+                        : `$${plans[planKey].price}/mo`}
+                    </Text>
+                  </InlineStack>
 
-                <Divider />
+                  <Divider />
 
-                <BlockStack gap="200">
-                  {plans.FREE.features.map((feature, i) => (
-                    <InlineStack key={i} gap="200">
-                      <Text as="span" variant="bodyMd">
-                        {feature}
-                      </Text>
-                    </InlineStack>
-                  ))}
+                  <BlockStack gap="200">
+                    {plans[planKey].features.map((feature, i) => (
+                      <InlineStack key={i} gap="200">
+                        <Text as="span" variant="bodyMd">
+                          {feature}
+                        </Text>
+                      </InlineStack>
+                    ))}
+                  </BlockStack>
+
+                  {billing.plan === planKey ? (
+                    <Badge tone="success">Current Plan</Badge>
+                  ) : planKey !== "FREE" ? (
+                    <Button variant="primary" onClick={handleManagePlan}>
+                      {`Switch to ${plans[planKey].name}`}
+                    </Button>
+                  ) : null}
                 </BlockStack>
-
-                {billing.plan === "FREE" && (
-                  <Badge tone="success">Current Plan</Badge>
-                )}
-              </BlockStack>
-            </Card>
-          </Layout.Section>
-
-          <Layout.Section variant="oneHalf">
-            <Card>
-              <BlockStack gap="400">
-                <InlineStack align="space-between">
-                  <Text as="h2" variant="headingMd">
-                    Pro Plan
-                  </Text>
-                  <Text as="span" variant="headingLg">
-                    ${plans.PRO.price}/mo
-                  </Text>
-                </InlineStack>
-
-                <Divider />
-
-                <BlockStack gap="200">
-                  {plans.PRO.features.map((feature, i) => (
-                    <InlineStack key={i} gap="200">
-                      <Text as="span" variant="bodyMd">
-                        {feature}
-                      </Text>
-                    </InlineStack>
-                  ))}
-                </BlockStack>
-
-                {billing.plan === "PRO" ? (
-                  <Badge tone="success">Current Plan</Badge>
-                ) : (
-                  <Button
-                    variant="primary"
-                    onClick={handleManagePlan}
-                  >
-                    Upgrade to Pro
-                  </Button>
-                )}
-              </BlockStack>
-            </Card>
-          </Layout.Section>
+              </Card>
+            </Layout.Section>
+          ))}
         </Layout>
 
         {/* FAQ / Info */}

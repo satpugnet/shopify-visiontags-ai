@@ -102,3 +102,19 @@ model UsageRecord {
 
   @@unique([shop, month])
 }
+
+// Durable cross-run record of successfully analyzed products.
+// Survives the per-scan delete/recreate of Product rows so scans can
+// skip already-processed products instead of re-charging for them.
+// productId is always the bare Shopify GID (gid://shopify/Product/123),
+// never the UUID-suffixed variant used by webhook-created Product rows.
+model ScannedProduct {
+  shop      String
+  productId String
+  imageUrl  String
+  scannedAt DateTime @default(now())
+  createdAt DateTime @default(now())
+
+  @@id([shop, productId])
+  @@index([shop])
+}

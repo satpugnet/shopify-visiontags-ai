@@ -19,6 +19,10 @@ const mocks = vi.hoisted(() => ({
       update: vi.fn(),
       findUnique: vi.fn(),
     },
+    scannedProduct: {
+      findMany: vi.fn(),
+      count: vi.fn(),
+    },
     $transaction: vi.fn(),
   },
   authenticate: {
@@ -36,8 +40,9 @@ const mocks = vi.hoisted(() => ({
   countProducts: vi.fn(),
   detectIndustry: vi.fn(),
   PLANS: {
-    FREE: { credits: 50 },
-    PRO: { credits: 5000 },
+    FREE: { credits: 50, scanLimit: 50 },
+    PRO: { credits: 5000, scanLimit: 500 },
+    SCALE: { credits: 15000, scanLimit: 2000 },
   },
 }));
 
@@ -107,10 +112,13 @@ const mockJob = {
   totalItems: 2,
 };
 
-function createScanRequest(collection = "all") {
+function createScanRequest(collection = "all", includeScanned = false) {
   const formData = new FormData();
   formData.append("action", "start-scan");
   formData.append("selectedCollection", collection);
+  if (includeScanned) {
+    formData.append("includeScanned", "true");
+  }
   return new Request("https://app.example.com/app", {
     method: "POST",
     body: formData,
@@ -148,6 +156,9 @@ beforeEach(() => {
   mocks.detectIndustry.mockReturnValue("general");
   // Default: shopSettings.update resolves (for industry caching)
   mocks.prisma.shopSettings.update.mockResolvedValue({});
+  // Default: empty scan ledger
+  mocks.prisma.scannedProduct.findMany.mockResolvedValue([]);
+  mocks.prisma.scannedProduct.count.mockResolvedValue(0);
   // Default: language setting is auto
   mocks.prisma.shopSettings.findUnique.mockResolvedValue({ language: "auto" });
   // Default: admin.graphql returns locale and shop name
@@ -173,6 +184,7 @@ describe("app._index action", () => {
     expect(mocks.prisma.job.create).toHaveBeenCalledWith({
       data: {
         shop: "test.myshopify.com",
+        collectionId: null,
         status: "QUEUED",
         totalItems: 2,
         industry: "general",
@@ -246,11 +258,56 @@ describe("app._index action", () => {
       mockAdmin,
       collectionGid,
       50,
+      { excludeIds: undefined },
     );
     expect(mocks.fetchAllProducts).not.toHaveBeenCalled();
   });
 
-  it("limits scan to plan-based cap (50 for Free, 500 for Pro)", async () => {
+  it("limits scan to plan-based cap (50 Free, 500 Pro, 2000 Scale)", async () => {
+    const planCases = [
+      { plan: "FREE", creditLimit: 50, expectedLimit: 50 },
+      { plan: "PRO", creditLimit: 5000, expectedLimit: 500 },
+      { plan: "SCALE", creditLimit: 15000, expectedLimit: 2000 },
+    ];
+
+    for (const { plan, creditLimit, expectedLimit } of planCases) {
+      vi.clearAllMocks();
+      mocks.authenticate.admin.mockResolvedValue({ admin: mockAdmin, session: mockSession });
+      mocks.getShopBilling.mockResolvedValue({
+        plan,
+        creditsUsed: 0,
+        creditLimit,
+        creditsRemaining: creditLimit,
+        billingPeriodStart: new Date(),
+        autoSyncEnabled: false,
+      });
+      mocks.prisma.job.findMany.mockResolvedValue([]);
+      mocks.detectIndustry.mockReturnValue("general");
+      mocks.fetchAllProducts.mockResolvedValue(mockProducts);
+      mocks.hasAvailableCredits.mockResolvedValue({ allowed: true });
+      mocks.prisma.job.create.mockResolvedValue(mockJob);
+      mocks.prisma.$transaction.mockResolvedValue([{}, {}]);
+      mocks.queueBulkAnalysis.mockResolvedValue(undefined);
+      mocks.consumeCredits.mockResolvedValue({ success: true });
+
+      await action({ request: createScanRequest() } as any);
+      expect(mocks.fetchAllProducts).toHaveBeenCalledWith(
+        mockAdmin,
+        expectedLimit,
+        { excludeIds: undefined },
+      );
+    }
+  });
+
+  it("caps the run at remaining credits (effectiveLimit = min(scanLimit, creditsRemaining))", async () => {
+    mocks.getShopBilling.mockResolvedValue({
+      plan: "PRO",
+      creditsUsed: 4990,
+      creditLimit: 5000,
+      creditsRemaining: 10,
+      billingPeriodStart: new Date(),
+      autoSyncEnabled: false,
+    });
     mocks.fetchAllProducts.mockResolvedValue(mockProducts);
     mocks.hasAvailableCredits.mockResolvedValue({ allowed: true });
     mocks.prisma.job.create.mockResolvedValue(mockJob);
@@ -258,14 +315,37 @@ describe("app._index action", () => {
     mocks.queueBulkAnalysis.mockResolvedValue(undefined);
     mocks.consumeCredits.mockResolvedValue({ success: true });
 
-    // Free plan: limit 50
     await action({ request: createScanRequest() } as any);
-    expect(mocks.fetchAllProducts).toHaveBeenCalledWith(mockAdmin, 50);
 
-    // Pro plan: limit 500
-    vi.clearAllMocks();
-    mocks.authenticate.admin.mockResolvedValue({ admin: mockAdmin, session: mockSession });
-    mocks.getShopBilling.mockResolvedValue({ plan: "PRO", creditsUsed: 0, creditLimit: 5000, creditsRemaining: 5000, billingPeriodStart: new Date(), autoSyncEnabled: false });
+    expect(mocks.fetchAllProducts).toHaveBeenCalledWith(mockAdmin, 10, {
+      excludeIds: undefined,
+    });
+  });
+
+  it("returns credit error before fetching when no credits remain", async () => {
+    mocks.getShopBilling.mockResolvedValue({
+      plan: "PRO",
+      creditsUsed: 5000,
+      creditLimit: 5000,
+      creditsRemaining: 0,
+      billingPeriodStart: new Date(),
+      autoSyncEnabled: false,
+    });
+
+    const response = await action({ request: createScanRequest() } as any);
+    const data = await response.json();
+
+    expect(data.success).toBe(false);
+    expect(data.error).toContain("Not enough credits");
+    expect(mocks.fetchAllProducts).not.toHaveBeenCalled();
+    expect(mocks.prisma.scannedProduct.findMany).not.toHaveBeenCalled();
+  });
+
+  it("passes already-scanned product IDs as excludeIds", async () => {
+    mocks.prisma.scannedProduct.findMany.mockResolvedValue([
+      { productId: "gid://shopify/Product/1" },
+      { productId: "gid://shopify/Product/9" },
+    ]);
     mocks.fetchAllProducts.mockResolvedValue(mockProducts);
     mocks.hasAvailableCredits.mockResolvedValue({ allowed: true });
     mocks.prisma.job.create.mockResolvedValue(mockJob);
@@ -274,7 +354,47 @@ describe("app._index action", () => {
     mocks.consumeCredits.mockResolvedValue({ success: true });
 
     await action({ request: createScanRequest() } as any);
-    expect(mocks.fetchAllProducts).toHaveBeenCalledWith(mockAdmin, 500);
+
+    expect(mocks.fetchAllProducts).toHaveBeenCalledWith(mockAdmin, 50, {
+      excludeIds: new Set([
+        "gid://shopify/Product/1",
+        "gid://shopify/Product/9",
+      ]),
+    });
+  });
+
+  it("bypasses the ledger when includeScanned is set", async () => {
+    mocks.prisma.scannedProduct.findMany.mockResolvedValue([
+      { productId: "gid://shopify/Product/1" },
+    ]);
+    mocks.fetchAllProducts.mockResolvedValue(mockProducts);
+    mocks.hasAvailableCredits.mockResolvedValue({ allowed: true });
+    mocks.prisma.job.create.mockResolvedValue(mockJob);
+    mocks.prisma.$transaction.mockResolvedValue([{}, {}]);
+    mocks.queueBulkAnalysis.mockResolvedValue(undefined);
+    mocks.consumeCredits.mockResolvedValue({ success: true });
+
+    await action({ request: createScanRequest("all", true) } as any);
+
+    expect(mocks.prisma.scannedProduct.findMany).not.toHaveBeenCalled();
+    expect(mocks.fetchAllProducts).toHaveBeenCalledWith(mockAdmin, 50, {
+      excludeIds: undefined,
+    });
+  });
+
+  it("returns all-scanned message when every product is already in the ledger", async () => {
+    mocks.prisma.scannedProduct.findMany.mockResolvedValue([
+      { productId: "gid://shopify/Product/1" },
+      { productId: "gid://shopify/Product/2" },
+    ]);
+    mocks.fetchAllProducts.mockResolvedValue([]);
+
+    const response = await action({ request: createScanRequest() } as any);
+    const data = await response.json();
+
+    expect(data.success).toBe(false);
+    expect(data.error).toContain("already been scanned");
+    expect(mocks.prisma.job.create).not.toHaveBeenCalled();
   });
 
   it("handles queue failure gracefully", async () => {

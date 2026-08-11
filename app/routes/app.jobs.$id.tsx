@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useLoaderData, useFetcher, useNavigate, useRevalidator } from "@remix-run/react";
@@ -25,6 +25,7 @@ import {
 import { TitleBar, useAppBridge } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
+import { LANGUAGE_NAMES } from "../services/vision.server";
 import { logger } from "../services/logger.server";
 
 const SYNC_BATCH_SIZE = 50;
@@ -38,8 +39,9 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     throw new Response("Job ID required", { status: 400 });
   }
 
-  const job = await prisma.job.findUnique({
-    where: { id },
+  // Scoped to the authenticated shop — a job UUID alone must not grant access
+  const job = await prisma.job.findFirst({
+    where: { id, shop },
     include: {
       products: {
         orderBy: { createdAt: "asc" },
@@ -97,8 +99,19 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   const formData = await request.formData();
   const action = formData.get("action");
 
+  if (!id) {
+    return json({ error: "Job ID required", success: false });
+  }
+
+  // Scoped to the authenticated shop — a job UUID alone must not grant access
+  const jobRecord = await prisma.job.findFirst({ where: { id, shop } });
+  if (!jobRecord) {
+    return json({ error: "Job not found", success: false });
+  }
+
   if (action === "sync") {
-    const productIds = formData.getAll("productIds") as string[];
+    const selectAll = formData.get("selectAll") === "true";
+    let productIds = formData.getAll("productIds") as string[];
     const syncMetafields = formData.get("syncMetafields") === "true";
     const syncTags = formData.get("syncTags") === "true";
     const syncAltText = formData.get("syncAltText") === "true";
@@ -120,8 +133,24 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       }
     }
 
+    // Server-selected batch for "Apply to Shopify" (auto-chained by the client).
+    // error: null is the chain-termination guarantee: products that fail a sync
+    // keep status ANALYZED but get error set, dropping them from later batches.
+    if (selectAll) {
+      const batch = await prisma.product.findMany({
+        where: { jobId: id, status: "ANALYZED", error: null },
+        orderBy: { createdAt: "asc" },
+        take: SYNC_BATCH_SIZE,
+        select: { id: true },
+      });
+      productIds = batch.map((b) => b.id);
+    }
+
     if (productIds.length === 0) {
-      return json({ error: "No products selected", success: false });
+      return json({
+        error: selectAll ? "No products ready to apply" : "No products selected",
+        success: false,
+      });
     }
 
     // Import services
@@ -144,19 +173,22 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         continue;
       }
 
-      // Store original Shopify data before overwriting (for revert)
-      try {
-        const currentData = await fetchProductDescriptionAndSeo(admin, productId);
-        await prisma.product.update({
-          where: { id: productId },
-          data: {
-            originalDescription: currentData.descriptionHtml,
-            originalSeoTitle: currentData.seoTitle,
-            originalMetaDescription: currentData.metaDescription,
-          },
-        });
-      } catch (e) {
-        logger.warn("ORIGINAL_DATA_CAPTURE_FAILED", { productId, error: e instanceof Error ? e.message : String(e) });
+      // Store original Shopify data before overwriting (for revert).
+      // Skip the extra read when originals were already captured (re-applies).
+      if (!product.originalDescription && !product.originalSeoTitle && !product.originalMetaDescription) {
+        try {
+          const currentData = await fetchProductDescriptionAndSeo(admin, productId);
+          await prisma.product.update({
+            where: { id: productId },
+            data: {
+              originalDescription: currentData.descriptionHtml,
+              originalSeoTitle: currentData.seoTitle,
+              originalMetaDescription: currentData.metaDescription,
+            },
+          });
+        } catch (e) {
+          logger.warn("ORIGINAL_DATA_CAPTURE_FAILED", { productId, error: e instanceof Error ? e.message : String(e) });
+        }
       }
 
       const originalMetafields = product.suggestedMetafields as Record<
@@ -253,6 +285,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
           data: {
             status: "SYNCED",
             syncedAt: new Date(),
+            error: null,
           },
         });
         synced++;
@@ -292,12 +325,93 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       });
     }
 
+    // How many are still applicable — drives the client's auto-chain
+    const remaining = await prisma.product.count({
+      where: { jobId: id, status: "ANALYZED", error: null },
+    });
+
     return json({
       success: true,
       synced,
       errors,
+      remaining,
       message,
       errorDetails: errorMessages,
+    });
+  }
+
+  if (action === "retry-failed") {
+    if (jobRecord.status === "QUEUED" || jobRecord.status === "PROCESSING") {
+      return json({ error: "Scan is still in progress", success: false });
+    }
+
+    const failed = await prisma.product.findMany({
+      where: { jobId: id, status: "ERROR" },
+    });
+
+    if (failed.length === 0) {
+      return json({ error: "No failed products to retry", success: false });
+    }
+
+    // Reset failed products and put the job back in PROCESSING. The update
+    // also refreshes updatedAt, protecting from the 15-min stale-job sweep.
+    await prisma.$transaction([
+      prisma.product.updateMany({
+        where: { jobId: id, status: "ERROR" },
+        data: { status: "PENDING", error: null },
+      }),
+      prisma.job.update({
+        where: { id },
+        data: {
+          status: "PROCESSING",
+          processed: Math.max(0, jobRecord.totalItems - failed.length),
+        },
+      }),
+    ]);
+
+    // Retried products keep the job's industry; language is passed only when
+    // explicitly set (auto-detect needs the scan-time locale lookup, and a
+    // retry prompt without it just defaults to English like the original
+    // fallback). vendor is not stored on Product rows, so it is omitted.
+    const settings = await prisma.shopSettings.findUnique({
+      where: { shop },
+      select: { language: true },
+    });
+    const langSetting = settings?.language ?? "auto";
+    const languageForPrompt =
+      langSetting !== "auto" ? LANGUAGE_NAMES[langSetting] || langSetting : undefined;
+
+    const { queueBulkAnalysis } = await import("../services/queue.server");
+    try {
+      await queueBulkAnalysis(
+        id,
+        failed.map((p) => ({ id: p.id, imageUrl: p.imageUrl, title: p.title })),
+        shop,
+        jobRecord.industry ?? undefined,
+        languageForPrompt,
+        undefined,
+        { bullJobIdSuffix: `r${Date.now()}` },
+      );
+    } catch (queueError) {
+      logger.error("RETRY_QUEUE_ERROR", {
+        shop,
+        jobId: id,
+        error: queueError instanceof Error ? queueError.message : String(queueError),
+      });
+      await prisma.job.update({
+        where: { id },
+        data: { status: "FAILED" },
+      });
+      return json({ error: "Failed to queue retry. Please try again.", success: false });
+    }
+
+    // Retries never consume credits — the original scan already paid for them.
+    logger.info("RETRY_FAILED_QUEUED", { shop, jobId: id, count: failed.length });
+
+    return json({
+      success: true,
+      retried: failed.length,
+      message: `Retrying ${failed.length} failed ${failed.length === 1 ? "product" : "products"} (no credits used)`,
     });
   }
 
@@ -376,7 +490,10 @@ type ActionData = {
   message?: string;
   error?: string;
   synced?: number;
+  errors?: number;
+  remaining?: number;
   reverted?: number;
+  retried?: number;
 };
 
 function productDisplayStatus(status: string) {
@@ -397,6 +514,12 @@ export default function JobDetail() {
   const revalidator = useRevalidator();
 
   const [confirmApply, setConfirmApply] = useState(false);
+  // Auto-chain state: ref mirrors the flag so the fetcher effect never acts on
+  // a stale closure, and lastHandledData guards against double-firing on the
+  // same response object.
+  const [chainApplying, setChainApplying] = useState(false);
+  const chainApplyingRef = useRef(false);
+  const lastHandledData = useRef<ActionData | null>(null);
   const [syncMetafields, setSyncMetafields] = useState(true);
   const [syncTags, setSyncTags] = useState(true);
   const [syncAltText, setSyncAltText] = useState(true);
@@ -478,31 +601,76 @@ export default function JobDetail() {
     return () => clearInterval(interval);
   }, [isProcessing, revalidator]);
 
-  // Auto-chain batch sync: after a batch completes, submit next batch if there are still ANALYZED products
-  useEffect(() => {
-    if (fetcher.data?.success && fetcher.data?.reverted && fetcher.data.reverted > 0) {
-      shopify.toast.show(fetcher.data.message || "Reverted successfully");
-      revalidator.revalidate();
-    } else if (fetcher.data?.success && fetcher.data?.synced && fetcher.data.synced > 0) {
-      shopify.toast.show(fetcher.data.message || "Applied successfully");
-    } else if (fetcher.data?.error) {
-      shopify.toast.show(fetcher.data.error, { isError: true });
-    }
-  }, [fetcher.data, shopify, revalidator]);
-
+  // The server selects each batch (ANALYZED products without sync errors),
+  // so chaining just resubmits the same form until nothing remains.
   const submitApplyAll = useCallback(() => {
-    const batch = analyzedProducts.slice(0, SYNC_BATCH_SIZE);
-    if (batch.length === 0) return;
     const formData = new FormData();
     formData.append("action", "sync");
+    formData.append("selectAll", "true");
     formData.append("syncMetafields", String(syncMetafields));
     formData.append("syncTags", String(syncTags));
     formData.append("syncAltText", String(syncAltText));
     formData.append("syncDescription", String(syncDescription));
     formData.append("edits", JSON.stringify(edits));
-    batch.forEach((p) => formData.append("productIds", p.id));
     fetcher.submit(formData, { method: "POST" });
-  }, [analyzedProducts, edits, fetcher, syncMetafields, syncTags, syncAltText, syncDescription]);
+  }, [edits, fetcher, syncMetafields, syncTags, syncAltText, syncDescription]);
+
+  const startApplyAll = useCallback(() => {
+    chainApplyingRef.current = true;
+    setChainApplying(true);
+    submitApplyAll();
+  }, [submitApplyAll]);
+
+  // Auto-chain batch sync: after a batch completes, submit the next batch
+  // while the server reports remaining applicable products.
+  useEffect(() => {
+    if (fetcher.state !== "idle" || !fetcher.data) return;
+    if (lastHandledData.current === fetcher.data) return;
+    lastHandledData.current = fetcher.data;
+    const data = fetcher.data;
+
+    if (data.success && data.reverted && data.reverted > 0) {
+      shopify.toast.show(data.message || "Reverted successfully");
+      revalidator.revalidate();
+      return;
+    }
+
+    if (data.success && data.retried && data.retried > 0) {
+      // Job is back in PROCESSING; the polling effect takes over from here
+      shopify.toast.show(data.message || "Retrying failed products");
+      revalidator.revalidate();
+      return;
+    }
+
+    if (chainApplyingRef.current) {
+      const madeProgress = (data.synced ?? 0) > 0;
+      const remaining = data.remaining ?? 0;
+      if (data.success && madeProgress && remaining > 0) {
+        submitApplyAll();
+        return;
+      }
+      chainApplyingRef.current = false;
+      setChainApplying(false);
+      if (data.success) {
+        const failNote = (data.errors ?? 0) > 0 ? `, ${data.errors} failed` : "";
+        shopify.toast.show(
+          remaining === 0
+            ? `All products applied${failNote}`
+            : `Apply stopped${failNote}`,
+          { isError: !madeProgress && remaining > 0 }
+        );
+      } else if (data.error) {
+        shopify.toast.show(data.error, { isError: true });
+      }
+      return;
+    }
+
+    if (data.success && data.synced && data.synced > 0) {
+      shopify.toast.show(data.message || "Applied successfully");
+    } else if (data.error) {
+      shopify.toast.show(data.error, { isError: true });
+    }
+  }, [fetcher.state, fetcher.data, shopify, revalidator, submitApplyAll]);
 
   const handleSyncSelected = () => {
     const formData = new FormData();
@@ -648,12 +816,25 @@ export default function JobDetail() {
                     And {products.filter((p) => p.status === "ERROR").length - 3} more...
                   </Text>
                 )}
+                <InlineStack gap="300">
+                  <Button
+                    onClick={() => {
+                      const formData = new FormData();
+                      formData.append("action", "retry-failed");
+                      fetcher.submit(formData, { method: "POST" });
+                    }}
+                    loading={isSyncing}
+                    disabled={isProcessing || chainApplying}
+                  >
+                    Retry failed scans (no credits used)
+                  </Button>
+                </InlineStack>
               </BlockStack>
             </Banner>
           )}
 
-          {/* Sync progress bar during apply */}
-          {isSyncing && syncedProducts.length > 0 && (
+          {/* Sync progress bar during apply (loader revalidates between chained batches) */}
+          {(isSyncing || chainApplying) && (
             <Card>
               <BlockStack gap="200">
                 <Text as="h2" variant="headingMd">Applying to Shopify...</Text>
@@ -867,17 +1048,17 @@ export default function JobDetail() {
                 <InlineStack gap="300">
                   <Button
                     variant="primary"
-                    onClick={submitApplyAll}
-                    loading={isSyncing}
+                    onClick={startApplyAll}
+                    loading={isSyncing || chainApplying}
                     disabled={!confirmApply || (!syncMetafields && !syncTags && !syncAltText && !syncDescription)}
                   >
-                    {isSyncing ? "Applying..." : `Apply to Shopify`}
+                    {isSyncing || chainApplying ? "Applying..." : `Apply to Shopify`}
                   </Button>
                   {selectedResources.length > 0 && selectedResources.length < analyzedProducts.length && (
                     <Button
                       onClick={handleSyncSelected}
                       loading={isSyncing}
-                      disabled={!confirmApply || (!syncMetafields && !syncTags && !syncAltText && !syncDescription)}
+                      disabled={!confirmApply || chainApplying || (!syncMetafields && !syncTags && !syncAltText && !syncDescription)}
                     >
                       {`Apply ${selectedResources.length} Selected Only`}
                     </Button>

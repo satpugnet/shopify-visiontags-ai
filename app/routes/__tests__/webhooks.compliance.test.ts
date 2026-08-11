@@ -16,6 +16,9 @@ const mocks = vi.hoisted(() => ({
     usageRecord: {
       deleteMany: vi.fn(),
     },
+    scannedProduct: {
+      deleteMany: vi.fn(),
+    },
     shopSettings: {
       findUnique: vi.fn(),
       deleteMany: vi.fn(),
@@ -137,6 +140,7 @@ describe("webhooks.compliance (unified handler)", () => {
     mocks.prisma.product.deleteMany.mockResolvedValue({ count: 10 });
     mocks.prisma.job.deleteMany.mockResolvedValue({ count: 5 });
     mocks.prisma.usageRecord.deleteMany.mockResolvedValue({ count: 3 });
+    mocks.prisma.scannedProduct.deleteMany.mockResolvedValue({ count: 7 });
     mocks.prisma.shopSettings.deleteMany.mockResolvedValue({ count: 1 });
     mocks.prisma.session.deleteMany.mockResolvedValue({ count: 2 });
 
@@ -154,6 +158,9 @@ describe("webhooks.compliance (unified handler)", () => {
       where: { job: { shop: "test-shop.myshopify.com" } },
     });
     expect(mocks.prisma.job.deleteMany).toHaveBeenCalledWith({
+      where: { shop: "test-shop.myshopify.com" },
+    });
+    expect(mocks.prisma.scannedProduct.deleteMany).toHaveBeenCalledWith({
       where: { shop: "test-shop.myshopify.com" },
     });
     expect(mocks.prisma.usageRecord.deleteMany).toHaveBeenCalledWith({

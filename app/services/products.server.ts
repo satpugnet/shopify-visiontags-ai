@@ -90,88 +90,130 @@ interface CollectionProductsResponse {
   };
 }
 
+const PRODUCT_GID_RE = /^(gid:\/\/shopify\/Product\/\d+)/;
+
 /**
- * Fetch all products with images from a shop
- * Uses cursor-based pagination
+ * Extract the bare Shopify product GID from a Product row ID.
+ * Manual scans use the bare GID as the row ID, while webhook-created rows
+ * use a "${gid}-${uuid}" suffixed variant — this normalizes both.
+ */
+export function extractProductGid(id: string): string | null {
+  return PRODUCT_GID_RE.exec(id)?.[1] ?? null;
+}
+
+export interface FetchProductsOptions {
+  /** Bare product GIDs to skip (e.g. already-scanned products) */
+  excludeIds?: Set<string>;
+}
+
+// Shopify's max page size. Exclusion filtering means a page can contribute
+// zero new products, so we always request full pages and keep walking.
+const PRODUCTS_PAGE_SIZE = 250;
+const MAX_PAGES = 400; // Safety guard: 400 pages × 250 = 100k products walkable
+
+/**
+ * Shared cursor-pagination loop: walks pages until `limit` products with
+ * images (and not excluded) are accumulated, or the catalog is exhausted.
+ */
+async function collectProductsWithImages(
+  fetchPage: (
+    first: number,
+    after: string | null
+  ) => Promise<{ edges: ProductEdge[]; pageInfo?: PageInfo }>,
+  limit: number,
+  excludeIds?: Set<string>
+): Promise<ProductWithImage[]> {
+  const products: ProductWithImage[] = [];
+  let hasNextPage = true;
+  let cursor: string | null = null;
+
+  for (let page = 0; hasNextPage && products.length < limit && page < MAX_PAGES; page++) {
+    const { edges, pageInfo } = await fetchPage(PRODUCTS_PAGE_SIZE, cursor);
+
+    // Break if no edges returned (prevents infinite loop)
+    if (edges.length === 0) break;
+
+    for (const edge of edges) {
+      if (products.length >= limit) break;
+      const product = edge.node as ShopifyProduct;
+
+      // Only include products with images
+      if (!product.featuredImage?.url) continue;
+      if (excludeIds?.has(product.id)) continue;
+
+      products.push({
+        id: product.id,
+        title: product.title,
+        vendor: product.vendor,
+        imageUrl: product.featuredImage.url,
+        category: product.category?.name || product.productType,
+        productType: product.productType,
+        tags: product.tags,
+      });
+    }
+
+    hasNextPage = pageInfo?.hasNextPage || false;
+    cursor = edges[edges.length - 1].cursor;
+  }
+
+  return products;
+}
+
+/**
+ * Fetch products with images from a shop
+ * Uses cursor-based pagination; skips options.excludeIds while continuing
+ * to paginate until `limit` new products are found or the catalog ends.
  */
 export async function fetchAllProducts(
   admin: AdminApiContext,
-  limit: number = 250
+  limit: number = 250,
+  options: FetchProductsOptions = {}
 ): Promise<ProductWithImage[]> {
   try {
-    const products: ProductWithImage[] = [];
-    let hasNextPage = true;
-    let cursor: string | null = null;
-    const MAX_PAGES = 100; // Safety guard: max 100 pages × 50 = 5000 products
-
-    for (let page = 0; hasNextPage && products.length < limit && page < MAX_PAGES; page++) {
-      // Wrap GraphQL call with retry logic for rate limits
-      const response = await withRetry(
-        () =>
-          admin.graphql(
-            `#graphql
-            query getProducts($first: Int!, $after: String) {
-              products(first: $first, after: $after) {
-                edges {
-                  cursor
-                  node {
-                    id
-                    title
-                    vendor
-                    featuredImage {
-                      url
-                    }
-                    productType
-                    tags
-                    category {
-                      name
+    return await collectProductsWithImages(
+      async (first, after) => {
+        // Wrap GraphQL call with retry logic for rate limits
+        const response = await withRetry(
+          () =>
+            admin.graphql(
+              `#graphql
+              query getProducts($first: Int!, $after: String) {
+                products(first: $first, after: $after) {
+                  edges {
+                    cursor
+                    node {
+                      id
+                      title
+                      vendor
+                      featuredImage {
+                        url
+                      }
+                      productType
+                      tags
+                      category {
+                        name
+                      }
                     }
                   }
+                  pageInfo {
+                    hasNextPage
+                  }
                 }
-                pageInfo {
-                  hasNextPage
-                }
-              }
-            }`,
-            {
-              variables: {
-                first: Math.min(50, limit - products.length),
-                after: cursor,
-              },
-            }
-          ),
-        { maxRetries: 3, baseDelayMs: 1000, logEvent: "SHOPIFY_API_RETRY" }
-      );
+              }`,
+              { variables: { first, after } }
+            ),
+          { maxRetries: 3, baseDelayMs: 1000, logEvent: "SHOPIFY_API_RETRY" }
+        );
 
-      const data = (await response.json()) as ProductsQueryResponse;
-      const edges: ProductEdge[] = data.data?.products?.edges || [];
-      const pageInfo = data.data?.products?.pageInfo;
-
-      // Break if no edges returned (prevents infinite loop)
-      if (edges.length === 0) break;
-
-      for (const edge of edges) {
-        const product = edge.node as ShopifyProduct;
-
-        // Only include products with images
-        if (product.featuredImage?.url) {
-          products.push({
-            id: product.id,
-            title: product.title,
-            vendor: product.vendor,
-            imageUrl: product.featuredImage.url,
-            category: product.category?.name || product.productType,
-            productType: product.productType,
-            tags: product.tags,
-          });
-        }
-      }
-
-      hasNextPage = pageInfo?.hasNextPage || false;
-      cursor = edges.length > 0 ? edges[edges.length - 1].cursor : null;
-    }
-
-    return products;
+        const data = (await response.json()) as ProductsQueryResponse;
+        return {
+          edges: data.data?.products?.edges || [],
+          pageInfo: data.data?.products?.pageInfo,
+        };
+      },
+      limit,
+      options.excludeIds
+    );
   } catch (error) {
     logger.error("PRODUCTS_FETCH_ERROR", { error: error instanceof Error ? error.message : String(error) });
     throw error;
@@ -312,84 +354,61 @@ export async function countProducts(admin: AdminApiContext): Promise<number> {
 }
 
 /**
- * Fetch products from a specific collection
+ * Fetch products with images from a specific collection
+ * Same pagination/exclusion behavior as fetchAllProducts.
  */
 export async function fetchCollectionProducts(
   admin: AdminApiContext,
   collectionId: string,
-  limit: number = 250
+  limit: number = 250,
+  options: FetchProductsOptions = {}
 ): Promise<ProductWithImage[]> {
   try {
-    const products: ProductWithImage[] = [];
-    let hasNextPage = true;
-    let cursor: string | null = null;
-    const MAX_PAGES = 100; // Safety guard against infinite loops
-
-    for (let page = 0; hasNextPage && products.length < limit && page < MAX_PAGES; page++) {
-      const response = await admin.graphql(
-        `#graphql
-        query getCollectionProducts($id: ID!, $first: Int!, $after: String) {
-          collection(id: $id) {
-            products(first: $first, after: $after) {
-              edges {
-                cursor
-                node {
-                  id
-                  title
-                  vendor
-                  featuredImage {
-                    url
-                  }
-                  productType
-                  tags
-                  category {
-                    name
+    return await collectProductsWithImages(
+      async (first, after) => {
+        const response = await withRetry(
+          () =>
+            admin.graphql(
+              `#graphql
+              query getCollectionProducts($id: ID!, $first: Int!, $after: String) {
+                collection(id: $id) {
+                  products(first: $first, after: $after) {
+                    edges {
+                      cursor
+                      node {
+                        id
+                        title
+                        vendor
+                        featuredImage {
+                          url
+                        }
+                        productType
+                        tags
+                        category {
+                          name
+                        }
+                      }
+                    }
+                    pageInfo {
+                      hasNextPage
+                    }
                   }
                 }
-              }
-              pageInfo {
-                hasNextPage
-              }
-            }
-          }
-        }`,
-        {
-          variables: {
-            id: collectionId,
-            first: Math.min(50, limit - products.length),
-            after: cursor,
-          },
-        }
-      );
+              }`,
+              { variables: { id: collectionId, first, after } }
+            ),
+          { maxRetries: 3, baseDelayMs: 1000, logEvent: "SHOPIFY_API_RETRY" }
+        );
 
-      const data = (await response.json()) as CollectionProductsResponse;
-      const edges: ProductEdge[] = data.data?.collection?.products?.edges || [];
-      const pageInfo = data.data?.collection?.products?.pageInfo;
-
-      // Break if no edges returned (prevents infinite loop)
-      if (edges.length === 0) break;
-
-      for (const edge of edges) {
-        const product = edge.node as ShopifyProduct;
-
-        if (product.featuredImage?.url) {
-          products.push({
-            id: product.id,
-            title: product.title,
-            vendor: product.vendor,
-            imageUrl: product.featuredImage.url,
-            category: product.category?.name || product.productType,
-            productType: product.productType,
-            tags: product.tags,
-          });
-        }
-      }
-
-      hasNextPage = pageInfo?.hasNextPage || false;
-      cursor = edges.length > 0 ? edges[edges.length - 1].cursor : null;
-    }
-
-    return products;
+        const data = (await response.json()) as CollectionProductsResponse;
+        return {
+          edges: data.data?.collection?.products?.edges || [],
+          pageInfo: data.data?.collection?.products?.pageInfo,
+        };
+      },
+      limit,
+      options.excludeIds
+    );
   } catch (error) {
     logger.error("COLLECTION_PRODUCTS_FETCH_ERROR", { collectionId, error: error instanceof Error ? error.message : String(error) });
     throw error;

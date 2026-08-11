@@ -8,8 +8,7 @@ const mocks = vi.hoisted(() => ({
   unauthenticated: {
     admin: vi.fn(),
   },
-  upgradeToProPlan: vi.fn(),
-  downgradeToFreePlan: vi.fn(),
+  setPlan: vi.fn(),
   mockGraphql: vi.fn(),
 }));
 
@@ -19,10 +18,20 @@ vi.mock("../../shopify.server", () => ({
   unauthenticated: mocks.unauthenticated,
 }));
 
-vi.mock("../../services/billing.server", () => ({
-  upgradeToProPlan: mocks.upgradeToProPlan,
-  downgradeToFreePlan: mocks.downgradeToFreePlan,
+// Prevent the real billing.server from pulling in the Prisma client
+vi.mock("../../db.server", () => ({
+  default: {},
 }));
+
+// Mock setPlan but keep the real name→plan resolvers so these tests
+// exercise the actual resolution logic end-to-end.
+vi.mock("../../services/billing.server", async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  return {
+    ...actual,
+    setPlan: mocks.setPlan,
+  };
+});
 
 // Import after mocking
 import { action } from "../webhooks.app-subscriptions.update";
@@ -63,12 +72,11 @@ function createMockRequest() {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.upgradeToProPlan.mockResolvedValue(undefined);
-  mocks.downgradeToFreePlan.mockResolvedValue(undefined);
+  mocks.setPlan.mockResolvedValue(undefined);
 });
 
 describe("webhooks.app-subscriptions.update", () => {
-  it("should upgrade to PRO when Shopify confirms active subscription", async () => {
+  it("should set PRO when Shopify confirms active Pro subscription", async () => {
     mocks.authenticate.webhook.mockResolvedValue({
       shop: "test-shop.myshopify.com",
       topic: "APP_SUBSCRIPTIONS_UPDATE",
@@ -81,11 +89,43 @@ describe("webhooks.app-subscriptions.update", () => {
     const response = await action({ request: createMockRequest() } as any);
 
     expect(response.status).toBe(200);
-    expect(mocks.upgradeToProPlan).toHaveBeenCalledWith("test-shop.myshopify.com");
-    expect(mocks.downgradeToFreePlan).not.toHaveBeenCalled();
+    expect(mocks.setPlan).toHaveBeenCalledWith("test-shop.myshopify.com", "PRO");
   });
 
-  it("should downgrade to FREE when only Free subscription is active", async () => {
+  it("should set SCALE when Shopify confirms active Scale subscription", async () => {
+    mocks.authenticate.webhook.mockResolvedValue({
+      shop: "test-shop.myshopify.com",
+      topic: "APP_SUBSCRIPTIONS_UPDATE",
+      payload: makeSubscriptionPayload("ACTIVE", "Scale"),
+    });
+    mockShopifySubscriptions([
+      { id: "gid://shopify/AppSubscription/789", name: "Scale", status: "ACTIVE" },
+    ]);
+
+    const response = await action({ request: createMockRequest() } as any);
+
+    expect(response.status).toBe(200);
+    expect(mocks.setPlan).toHaveBeenCalledWith("test-shop.myshopify.com", "SCALE");
+  });
+
+  it("should resolve to the highest plan when old and new subscriptions are both reported active", async () => {
+    mocks.authenticate.webhook.mockResolvedValue({
+      shop: "test-shop.myshopify.com",
+      topic: "APP_SUBSCRIPTIONS_UPDATE",
+      payload: makeSubscriptionPayload("ACTIVE", "Scale"),
+    });
+    mockShopifySubscriptions([
+      { id: "gid://shopify/AppSubscription/123", name: "Pro", status: "ACTIVE" },
+      { id: "gid://shopify/AppSubscription/789", name: "Scale", status: "ACTIVE" },
+    ]);
+
+    const response = await action({ request: createMockRequest() } as any);
+
+    expect(response.status).toBe(200);
+    expect(mocks.setPlan).toHaveBeenCalledWith("test-shop.myshopify.com", "SCALE");
+  });
+
+  it("should set FREE when only Free subscription is active", async () => {
     mocks.authenticate.webhook.mockResolvedValue({
       shop: "test-shop.myshopify.com",
       topic: "APP_SUBSCRIPTIONS_UPDATE",
@@ -98,11 +138,10 @@ describe("webhooks.app-subscriptions.update", () => {
     const response = await action({ request: createMockRequest() } as any);
 
     expect(response.status).toBe(200);
-    expect(mocks.downgradeToFreePlan).toHaveBeenCalledWith("test-shop.myshopify.com");
-    expect(mocks.upgradeToProPlan).not.toHaveBeenCalled();
+    expect(mocks.setPlan).toHaveBeenCalledWith("test-shop.myshopify.com", "FREE");
   });
 
-  it("should downgrade to FREE when Shopify confirms no active subscriptions", async () => {
+  it("should set FREE when Shopify confirms no active subscriptions", async () => {
     mocks.authenticate.webhook.mockResolvedValue({
       shop: "test-shop.myshopify.com",
       topic: "APP_SUBSCRIPTIONS_UPDATE",
@@ -113,8 +152,7 @@ describe("webhooks.app-subscriptions.update", () => {
     const response = await action({ request: createMockRequest() } as any);
 
     expect(response.status).toBe(200);
-    expect(mocks.downgradeToFreePlan).toHaveBeenCalledWith("test-shop.myshopify.com");
-    expect(mocks.upgradeToProPlan).not.toHaveBeenCalled();
+    expect(mocks.setPlan).toHaveBeenCalledWith("test-shop.myshopify.com", "FREE");
   });
 
   it("should stay on PRO when CANCELLED webhook arrives but another subscription is still active (race condition)", async () => {
@@ -133,12 +171,11 @@ describe("webhooks.app-subscriptions.update", () => {
     const response = await action({ request: createMockRequest() } as any);
 
     expect(response.status).toBe(200);
-    // Should upgrade (stay on Pro), NOT downgrade despite CANCELLED webhook
-    expect(mocks.upgradeToProPlan).toHaveBeenCalledWith("test-shop.myshopify.com");
-    expect(mocks.downgradeToFreePlan).not.toHaveBeenCalled();
+    // Should resolve to Pro, NOT Free, despite CANCELLED webhook
+    expect(mocks.setPlan).toHaveBeenCalledWith("test-shop.myshopify.com", "PRO");
   });
 
-  it("should fall back to webhook payload when Shopify query fails (ACTIVE)", async () => {
+  it("should fall back to webhook payload when Shopify query fails (ACTIVE Pro)", async () => {
     mocks.authenticate.webhook.mockResolvedValue({
       shop: "test-shop.myshopify.com",
       topic: "APP_SUBSCRIPTIONS_UPDATE",
@@ -150,8 +187,21 @@ describe("webhooks.app-subscriptions.update", () => {
     const response = await action({ request: createMockRequest() } as any);
 
     expect(response.status).toBe(200);
-    expect(mocks.upgradeToProPlan).toHaveBeenCalledWith("test-shop.myshopify.com");
-    expect(mocks.downgradeToFreePlan).not.toHaveBeenCalled();
+    expect(mocks.setPlan).toHaveBeenCalledWith("test-shop.myshopify.com", "PRO");
+  });
+
+  it("should fall back to webhook payload when Shopify query fails (ACTIVE Scale)", async () => {
+    mocks.authenticate.webhook.mockResolvedValue({
+      shop: "test-shop.myshopify.com",
+      topic: "APP_SUBSCRIPTIONS_UPDATE",
+      payload: makeSubscriptionPayload("ACTIVE", "Scale"),
+    });
+    mocks.unauthenticated.admin.mockRejectedValue(new Error("Token expired"));
+
+    const response = await action({ request: createMockRequest() } as any);
+
+    expect(response.status).toBe(200);
+    expect(mocks.setPlan).toHaveBeenCalledWith("test-shop.myshopify.com", "SCALE");
   });
 
   it("should fall back to webhook payload when Shopify query fails (CANCELLED)", async () => {
@@ -165,11 +215,10 @@ describe("webhooks.app-subscriptions.update", () => {
     const response = await action({ request: createMockRequest() } as any);
 
     expect(response.status).toBe(200);
-    expect(mocks.downgradeToFreePlan).toHaveBeenCalledWith("test-shop.myshopify.com");
-    expect(mocks.upgradeToProPlan).not.toHaveBeenCalled();
+    expect(mocks.setPlan).toHaveBeenCalledWith("test-shop.myshopify.com", "FREE");
   });
 
-  it("should not change plan when status is unrecognized and no active subscriptions", async () => {
+  it("should set FREE when status is unrecognized and no active subscriptions", async () => {
     mocks.authenticate.webhook.mockResolvedValue({
       shop: "test-shop.myshopify.com",
       topic: "APP_SUBSCRIPTIONS_UPDATE",
@@ -180,8 +229,8 @@ describe("webhooks.app-subscriptions.update", () => {
     const response = await action({ request: createMockRequest() } as any);
 
     expect(response.status).toBe(200);
-    // No active subscriptions → downgrade
-    expect(mocks.downgradeToFreePlan).toHaveBeenCalledWith("test-shop.myshopify.com");
+    // No active subscriptions → Free
+    expect(mocks.setPlan).toHaveBeenCalledWith("test-shop.myshopify.com", "FREE");
   });
 
   it("should handle missing or empty payload gracefully", async () => {
@@ -195,8 +244,8 @@ describe("webhooks.app-subscriptions.update", () => {
     const response = await action({ request: createMockRequest() } as any);
 
     expect(response.status).toBe(200);
-    // No active subscriptions → downgrade to Free
-    expect(mocks.downgradeToFreePlan).toHaveBeenCalledWith("test-shop.myshopify.com");
+    // No active subscriptions → Free
+    expect(mocks.setPlan).toHaveBeenCalledWith("test-shop.myshopify.com", "FREE");
   });
 
   it("should fall back gracefully when Shopify query fails with empty payload", async () => {
@@ -211,15 +260,13 @@ describe("webhooks.app-subscriptions.update", () => {
 
     expect(response.status).toBe(200);
     // No status in payload + fallback → no action taken
-    expect(mocks.upgradeToProPlan).not.toHaveBeenCalled();
-    expect(mocks.downgradeToFreePlan).not.toHaveBeenCalled();
+    expect(mocks.setPlan).not.toHaveBeenCalled();
   });
 
   it("should handle EXPIRED and DECLINED via Shopify query (no active subs)", async () => {
     for (const status of ["EXPIRED", "DECLINED"]) {
       vi.clearAllMocks();
-      mocks.upgradeToProPlan.mockResolvedValue(undefined);
-      mocks.downgradeToFreePlan.mockResolvedValue(undefined);
+      mocks.setPlan.mockResolvedValue(undefined);
 
       mocks.authenticate.webhook.mockResolvedValue({
         shop: "test-shop.myshopify.com",
@@ -231,8 +278,7 @@ describe("webhooks.app-subscriptions.update", () => {
       const response = await action({ request: createMockRequest() } as any);
 
       expect(response.status).toBe(200);
-      expect(mocks.downgradeToFreePlan).toHaveBeenCalledWith("test-shop.myshopify.com");
-      expect(mocks.upgradeToProPlan).not.toHaveBeenCalled();
+      expect(mocks.setPlan).toHaveBeenCalledWith("test-shop.myshopify.com", "FREE");
     }
   });
 
@@ -244,7 +290,6 @@ describe("webhooks.app-subscriptions.update", () => {
     const response = await action({ request: createMockRequest() } as any);
 
     expect(response.status).toBe(200);
-    expect(mocks.upgradeToProPlan).not.toHaveBeenCalled();
-    expect(mocks.downgradeToFreePlan).not.toHaveBeenCalled();
+    expect(mocks.setPlan).not.toHaveBeenCalled();
   });
 });
