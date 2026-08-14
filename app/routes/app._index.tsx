@@ -22,7 +22,13 @@ import {
 import { TitleBar, useAppBridge } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
-import { countProducts } from "../services/products.server";
+import {
+  countProducts,
+  parseTagFilter,
+  serializeTagFilter,
+  describeTagFilter,
+} from "../services/products.server";
+import { readTagSchema, writeTagSchema } from "../services/tagSchema.server";
 import {
   getShopBilling,
   syncPlanFromShopify,
@@ -159,17 +165,24 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     });
   }
 
-  // Get language setting
+  // Get language and tag settings
   const shopSettings = await prisma.shopSettings.findUnique({
     where: { shop },
-    select: { language: true },
+    select: { language: true, tagFormat: true, tagSchema: true },
   });
   const language = shopSettings?.language ?? "auto";
+  const tagSchema = readTagSchema(shopSettings?.tagSchema);
+  const tagFormat = shopSettings?.tagFormat === "KEY_VALUE" && tagSchema ? "KEY_VALUE" : "FREEFORM";
+  // Drives the "missing tag key" filter options, so a merchant can point a run
+  // at the products still lacking a given key.
+  const tagKeys = tagSchema?.keys.map((k) => k.key) ?? [];
 
   return json({
     shop,
     productCount,
     scannedCount,
+    tagFormat,
+    tagKeys,
     billing,
     proFeatures: PLANS.PRO.features,
     proPrice: PLANS.PRO.price,
@@ -240,6 +253,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     // Get selected collection (if any)
     const selectedCollection = formData.get("selectedCollection") as string;
     const includeScanned = formData.get("includeScanned") === "true";
+    const tagFilter = parseTagFilter(formData.get("tagFilter") as string);
 
     // Cap the run at plan limit AND remaining credits, and bail out before
     // any fetching when there is nothing left to spend.
@@ -277,9 +291,21 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       }
     }
 
+    // Set when the walk stopped on its time/page budget with catalog left over,
+    // so the merchant is told the batch is partial rather than assuming the
+    // filter matched nothing more.
+    let budgetExhausted = false;
+    const fetchOptions = {
+      excludeIds,
+      tagFilter,
+      onBudgetExhausted: () => {
+        budgetExhausted = true;
+      },
+    };
+
     const products = selectedCollection && selectedCollection !== "all"
-      ? await fetchCollectionProducts(admin, selectedCollection, effectiveLimit, { excludeIds })
-      : await fetchAllProducts(admin, effectiveLimit, { excludeIds });
+      ? await fetchCollectionProducts(admin, selectedCollection, effectiveLimit, fetchOptions)
+      : await fetchAllProducts(admin, effectiveLimit, fetchOptions);
 
     const collection = selectedCollection && selectedCollection !== "all" ? selectedCollection : "all";
     logger.info("SCAN_PRODUCTS_FETCHED", {
@@ -288,10 +314,25 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       effectiveLimit,
       collection,
       includeScanned,
+      tagFilter: serializeTagFilter(tagFilter) ?? "ANY",
+      budgetExhausted,
       skippedScanned: excludeIds?.size ?? 0,
     });
 
     if (products.length === 0) {
+      if (tagFilter.kind !== "ANY") {
+        logger.info("SCAN_BLOCKED_NO_TAG_MATCH", {
+          shop,
+          tagFilter: serializeTagFilter(tagFilter),
+          budgetExhausted,
+        });
+        return json({
+          error: budgetExhausted
+            ? `No ${describeTagFilter(tagFilter)} found yet in the part of your catalog we could check in time. Run the scan again to keep going.`
+            : `No ${describeTagFilter(tagFilter)} left to scan. Try a different tag filter.`,
+          success: false,
+        });
+      }
       if (excludeIds && excludeIds.size > 0) {
         logger.info("SCAN_BLOCKED_ALL_SCANNED", { shop, scannedCount: excludeIds.size });
         return json({
@@ -321,7 +362,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     // Resolve language and store name for AI prompt context
     const shopSettingsForScan = await prisma.shopSettings.findUnique({
       where: { shop },
-      select: { language: true },
+      select: { language: true, tagFormat: true, tagSchema: true },
     });
     let resolvedLanguage: string | undefined;
     const langSetting = shopSettingsForScan?.language ?? "auto";
@@ -391,7 +432,18 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       });
     }
 
-    // Create job
+    // Create job.
+    //
+    // Tag settings are snapshot onto the job rather than read live at analysis
+    // time: the worker runs out of process and "retry failed" re-runs against
+    // this same job, so a live read could split one run across two schema
+    // versions and leave the apply step unable to tell which tag keys it owns.
+    const scanTagSchema = readTagSchema(shopSettingsForScan?.tagSchema);
+    const scanTagFormat =
+      shopSettingsForScan?.tagFormat === "KEY_VALUE" && scanTagSchema
+        ? "KEY_VALUE"
+        : "FREEFORM";
+
     const job = await prisma.job.create({
       data: {
         shop,
@@ -399,6 +451,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         status: "QUEUED",
         totalItems: products.length,
         industry: industryId,
+        tagFormat: scanTagFormat,
+        tagSchema: writeTagSchema(scanTagSchema),
+        tagFilter: serializeTagFilter(tagFilter),
       },
     });
 
@@ -512,7 +567,7 @@ function relativeTime(dateStr: string): string {
 }
 
 export default function Dashboard() {
-  const { productCount, scannedCount, billing, jobs, proFeatures, proPrice, planPickerUrl, collections, pendingSyncCount, recentJobId, language } = useLoaderData<typeof loader>();
+  const { productCount, scannedCount, billing, jobs, proFeatures, proPrice, planPickerUrl, collections, pendingSyncCount, recentJobId, language, tagFormat, tagKeys } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<ActionData>();
   const languageFetcher = useFetcher();
   const shopify = useAppBridge();
@@ -521,6 +576,7 @@ export default function Dashboard() {
   const [selectedCollection, setSelectedCollection] = useState("all");
   const [selectedLanguage, setSelectedLanguage] = useState(language);
   const [includeScanned, setIncludeScanned] = useState(false);
+  const [tagFilter, setTagFilter] = useState("ANY");
 
   const isScanning =
     fetcher.state === "submitting" && fetcher.formData?.get("action") === "start-scan";
@@ -556,6 +612,7 @@ export default function Dashboard() {
         action: "start-scan",
         selectedCollection,
         includeScanned: includeScanned ? "true" : "false",
+        tagFilter,
       },
       { method: "POST" }
     );
@@ -566,6 +623,18 @@ export default function Dashboard() {
     ...collections.map((c) => ({
       label: `${c.title} (${c.productsCount} ${c.productsCount === 1 ? "product" : "products"})`,
       value: c.id,
+    })),
+  ];
+
+  const tagFilterOptions = [
+    { label: "Any tagging state", value: "ANY" },
+    { label: "Only products with no tags", value: "UNTAGGED" },
+    { label: "Only products that already have tags", value: "TAGGED" },
+    // One option per key the merchant defined, so a run can target the gap for a
+    // single attribute instead of the whole catalog.
+    ...tagKeys.map((key) => ({
+      label: `Only products missing a "${key}" tag`,
+      value: `MISSING_KEY:${key}`,
     })),
   ];
 
@@ -709,12 +778,36 @@ export default function Dashboard() {
                   onChange={setSelectedCollection}
                 />
 
+                <Select
+                  label="Tag filter"
+                  helpText={
+                    tagFilter === "ANY"
+                      ? "Narrow a run to products still missing tags, so your credits go to the gaps."
+                      : "Large catalogs are scanned in batches. Run the scan again to continue where this one stops."
+                  }
+                  options={tagFilterOptions}
+                  value={tagFilter}
+                  onChange={setTagFilter}
+                />
+
                 <Checkbox
                   label="Include already-scanned products (uses credits)"
                   helpText="Scans normally skip products that were already processed, so repeated runs work through your catalog without double-charging."
                   checked={includeScanned}
                   onChange={setIncludeScanned}
                 />
+
+                <InlineStack gap="200" blockAlign="center">
+                  <Text as="span" variant="bodySm" tone="subdued">
+                    Tag style:{" "}
+                    {tagFormat === "KEY_VALUE"
+                      ? `Key:Value from your ${tagKeys.length} defined ${tagKeys.length === 1 ? "key" : "keys"}`
+                      : "descriptive phrases"}
+                  </Text>
+                  <Button variant="plain" onClick={() => navigate("/app/settings")}>
+                    Change
+                  </Button>
+                </InlineStack>
 
                 <Select
                   label="Output language"

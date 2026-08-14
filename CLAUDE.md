@@ -89,10 +89,13 @@ app/
 │   ├── vision.server.ts      # Claude API for image analysis
 │   ├── metafields.server.ts  # Shopify metafield operations
 │   ├── queue.server.ts       # BullMQ background processing
-│   ├── products.server.ts    # Shopify product operations
+│   ├── products.server.ts    # Shopify product operations + scan tag filter
+│   ├── tagSchema.ts          # Key:Value tag schema (pure, isomorphic)
+│   ├── tagSchema.server.ts   # Prisma Json bridging for the above
 │   └── billing.server.ts     # Subscription & credit management
 ├── routes/
 │   ├── app._index.tsx        # Dashboard
+│   ├── app.settings.tsx      # Tag format & schema editor
 │   ├── app.jobs.$id.tsx      # Job detail & sync page
 │   └── webhooks.products.create.tsx  # Auto-sync webhook
 └── db.server.ts              # Prisma client
@@ -119,6 +122,71 @@ Scans skip already-analyzed products via the `ScannedProduct` ledger (cross-run
 dedup, no double-charging); merchants can rescan via the "Include already-scanned
 products" checkbox. Failed scans can be retried free from the job page.
 
+### Tag Format (Settings page)
+
+Merchants choose between free-form phrase tags (default) and `Key:Value` tags
+driven by a schema they define at `/app/settings` (keys, plus optional allowed
+values per key). All plans, no gating.
+
+- Pure schema logic lives in `app/services/tagSchema.ts` (isomorphic, so the
+  settings page can parse and preview client-side); `tagSchema.server.ts` only
+  bridges Prisma `Json?` columns.
+- In `KEY_VALUE` mode the AI is asked for a `tag_attributes` **object**, not
+  pre-joined strings, then values are snapped onto the merchant's vocabulary
+  (exact, then loose, then alias, then unambiguous containment). Canonical casing
+  always comes from the schema, never the model. Rejected values are stored on
+  `Product.rejectedTagAttributes`.
+- **Tag settings are snapshot onto `Job`** at scan start (`tagFormat`,
+  `tagSchema`). The worker reads them from the Job only, never live from
+  `ShopSettings` — a live read would let one run span two schema versions. Every
+  job creator must snapshot (dashboard + both product webhooks).
+- The prompt must keep the "never translate a key or listed value" rule: the
+  surrounding language rule would otherwise turn `Color` into `Couleur` for a
+  non-English store and every attribute would be rejected.
+
+### Tag writes are a merge, never a replace
+
+`updateProductTags` uses `productUpdate`, which replaces a product's entire tag
+list, so the merged list is computed before writing:
+
+- `KEY_VALUE`: a key's existing tags are replaced **only when the AI returned a
+  value for that key**. The prompt tells the model to omit keys it cannot assess,
+  so treating "no answer" as "delete what's there" would routinely destroy
+  attributes the merchant had already filled in. Keys the AI skipped are left
+  alone; every non-schema tag always survives.
+- `FREEFORM`: union, nothing is ever removed.
+- An empty suggestion list is never a request to clear tags — it means the scan
+  produced nothing usable, and no write happens.
+
+Live tags are read at apply time (`fetchProductSyncState`), not taken from the
+scan-time `Product.currentTags` snapshot. If that read fails the tag write is
+**refused** rather than falling back to a replace. This costs one extra Admin API
+read per product on every tag-syncing apply (it is what makes the merge safe);
+worth knowing before a large backfill, since a 2,000-product Scale job
+auto-chains in 50-product batches.
+
+`Product.appliedTags` records exactly what was written so `revert-all` undoes only
+our delta. Revert covers any product with `appliedTags`, not just `SYNCED` ones,
+because a tag write can land while another field fails. For products applied
+before that column existed it falls back to `suggestedTags` as the record of what
+was written — never a full replace from `currentTags`, which would delete
+everything the merchant added since the scan.
+
+### Scan tag filter
+
+The scan form can target a tagging state: any / no tags / has tags / missing a
+specific key (one option per schema key). `-tag:*` and `tag:*` narrow the query
+server-side on the all-products path; `MISSING_KEY` cannot be expressed in
+Shopify search syntax and is client-side only, as is everything on the collection
+path (`collection.products` takes no `query` argument). If Shopify **rejects** a
+narrowed query (errors, no products payload) the query is dropped and the walk
+falls back to client-side filtering, so a syntax surprise can never look like "no
+products match". An empty result is *not* treated as a rejection: `-tag:*` on a
+fully tagged catalog legitimately matches nothing.
+Selection is bounded by a 15s wall-clock budget (it runs synchronously inside the
+Remix action); partial batches are safe because the ledger makes the next run
+resume.
+
 ### Cost Analysis (Claude Haiku 4.5)
 - Cost per scan: ~$0.004 (1024 max_tokens)
 - Free (50 scans): ~$0.20 cost (acquisition)
@@ -127,16 +195,17 @@ products" checkbox. Failed scans can be retried free from the job page.
 
 ## Current Progress
 
-**Last updated**: Jul 26, 2026
+**Last updated**: Aug 14, 2026
 **Current phase**: Live on Shopify App Store
 **Billing**: Uses Shopify Managed Pricing (plans configured in Partner Dashboard, NOT in code)
 **Merchants (as of Jul 26, 2026, from production DB)**: 26 total installs, all on FREE plan. **0 paying — $0 MRR.** The former Pro customer (`resalefirm.myshopify.com`, 816 scans in Mar 2026 — the "Phoenix Publishing" first-paying customer) has churned back to FREE. No active subscription charges (confirmed via Partner API: no `SUBSCRIPTION_CHARGE_ACTIVATED` events in recent history). Several free installs hit the 50-credit cap and uninstalled rather than upgrading (`bgjgv1-6z`, `0fe70f-2c`, `a2f506-2`) — the paid-conversion leak. Steady trickle of new installs continues (last install Jul 26).
 **Next steps**:
 1. Create the "Scale" plan in the Partner Dashboard Managed Pricing UI ($79/mo, display name exactly `Scale`, 0 trial days) — code shipped Aug 11, waiting on this manual step
-2. Reply to LaFetch (Sagar@la-fetch.com) once Scale is live; get them upgraded for the 11k backfill
-3. Grow distribution (App Store SEO, content marketing, direct outreach)
-4. Remaining quick wins: settings page + custom prompts, free tier bump, Pro repricing to $29
-5. Fast-follow: job-detail page pagination (2,000-row Scale jobs load unpaginated), jobs history page, collections picker >50
+2. Reply to LaFetch (Sagar@la-fetch.com): Key:Value tags + tag filters shipped Aug 14; get them upgraded to Scale for the 12k backfill
+3. Reinstall the app on the dev store so end-to-end testing works again (token revoked)
+4. Grow distribution (App Store SEO, content marketing, direct outreach)
+5. Remaining quick wins: custom prompts on the settings page, free tier bump, Pro repricing to $29
+6. Fast-follow: job-detail page pagination (2,000-row Scale jobs load unpaginated), jobs history page, collections picker >50, surface `Product.rejectedTagAttributes` as a "the AI proposed N values your schema rejects — add them?" prompt
 
 ## Development Commands
 
@@ -159,7 +228,12 @@ railway up
 
 ## Known Issues / Blockers
 
-- None currently
+- **Dev store token is revoked.** The stored `Session` row for
+  `visiontags-dev.myshopify.com` returns "Invalid API key or access token", so the
+  app cannot be exercised against it without reinstalling. This blocked verifying
+  the `-tag:*` / `tag:*` search syntax against a real store (mitigated in code by
+  the empty-first-page fallback, see Scan tag filter above). Reinstall the app on
+  the dev store to restore end-to-end testing.
 
 ## Resolved Issues
 
@@ -171,6 +245,7 @@ railway up
 
 ## Recent Changes
 
+- **Aug 14, 2026**: Second LaFetch feedback package. (1) **Merchant-defined `Key:Value` tags**: new Settings page (`/app/settings`, first entry in the nav) where a merchant switches tag format and defines keys with optional allowed values, entered as bulk text (`Color: Black, Navy`) with a live parsed preview and a "Prefill from my catalog" button that reads existing `Key:Value` tags via paginated `QueryRoot.productTags`. Vision asks for a `tag_attributes` object in this mode and normalizes it against the schema. (2) **Tag writes now merge instead of replace** — this was a live data-loss bug: applying a scan overwrote the product's whole tag list, destroying any tag VisionTags did not generate (112 products across 9 shops already affected; LaFetch had never applied, so their catalog was untouched). Revert now undoes only our delta via the new `Product.appliedTags`. (3) **Scan tag filter**: any / no tags / has tags / missing a specific key, with server-side narrowing where Shopify supports it and a self-healing fallback. (4) Prisma: `ShopSettings.tagFormat|tagSchema`, `Job.tagFormat|tagSchema|tagFilter`, `Product.appliedTags|rejectedTagAttributes` (all additive). `max_tokens` raised 1024 → 2048. `analyzeProductImage` now takes an options object. Trigger: Sagar at LaFetch emailed Aug 14 asking for a configurable Key:Value tag structure and a way to target untagged products.
 - **Aug 11, 2026**: Shipped the LaFetch feedback package: (1) Scale plan ($79/mo, 15,000 credits, 2,000 products/run) — plan resolution refactored to name-based `setPlan`/resolvers supporting 3 tiers; (2) `ScannedProduct` cross-run ledger — scans now skip already-analyzed products and keep paginating until the batch fills with new ones (fixes "All products" runs re-scanning the same first 500 and double-charging); "Include already-scanned" checkbox for intentional rescans; "Products scanned X/N" progress on dashboard; (3) fixed broken "Apply to Shopify" auto-chain (server-selected 50-product batches, client resubmits until done — was 1 click per 50 products); (4) "Retry failed scans" button, free (no credit charge); (5) worker job-progress query fixed (was O(n²) at large runs); (6) security: job loader/actions now scoped to the authenticated shop; (7) backfill script `scripts/backfill-scan-ledger.ts` (run once after deploy). Trigger: LaFetch (la-fetch.myshopify.com, Pro) emailed Aug 11 asking how to backfill an 11k-product catalog — their two 500-product runs on Aug 10 had 100% overlap (500 credits double-charged, refunded).
 - **Feb 20, 2026**: Migrated from Anthropic API to OpenRouter (Anthropic Skin) for better rate limits. Added Sentry error tracking (vision service + queue worker). Added dry run mode for stress testing. Raised scan limit from 100 to plan-based (50 Free / 500 Pro).
 - **Feb 19, 2026**: Shipped product descriptions + SEO generation (descriptions, SEO titles, meta descriptions generated from product images). Updated App Store listing with new features and search terms. Published Medium article on AI shopping readiness.
@@ -179,7 +254,7 @@ railway up
 
 | Store | Email | Plan | Joined | Notes |
 |-------|-------|------|--------|-------|
-| LaFetch (la-fetch.myshopify.com, la-fetch.com) | Sagar@la-fetch.com (Sagar Joon, AI Developer) | Pro ($19/mo) | Aug 10, 2026 | Second paying customer. 11,000-product catalog, doing a one-time tagging backfill. Emailed Aug 11 asking about bulk credits, per-run limits, untagged-only filtering, and double-charging — triggered the Scale plan + scan ledger release (see Recent Changes Aug 11). Their two 500-product runs on Aug 10 overlapped 100%; 500 credits refunded. Target: upgrade to Scale for one month to complete the backfill. |
+| LaFetch (la-fetch.myshopify.com, la-fetch.com) | Sagar@la-fetch.com (Sagar Joon, AI Developer) | Pro ($19/mo) | Aug 10, 2026 | Second paying customer. ~12,000-product catalog, doing a one-time tagging backfill. Emailed Aug 11 (bulk credits, per-run limits, untagged-only filtering, double-charging) → Scale plan + scan ledger release. Emailed Aug 14 asking for configurable `Key:Value` tags with their own allowed values, plus tagging-state filters → Aug 14 release. Their two 500-product runs on Aug 10 overlapped 100%; 500 credits refunded. **Has never applied to Shopify** (0 synced across all 5 jobs as of Aug 14), so the pre-Aug-14 tag-replace bug never touched their catalog. Target: upgrade to Scale for one month to complete the backfill. |
 | Phoenix Publishing | phoenix.publishing.com@gmail.com | Pro ($19/mo) | Feb 2026 | First paying customer. Applied $5 discount for 1 month. Sent thank-you email from marco.a.duval@gmail.com (Feb 19, 2026) requesting feedback and App Store review. Churned back to FREE (as of Jul 2026). |
 | AURASPINE | Unknown | Unknown | ~Feb 20, 2026 | New customer, appeared organically (not from known outreach). Origin unverified. |
 | pro-grab-bar.myshopify.com | Unknown | Unknown | ~Feb 20, 2026 | Seen in production webhook logs (products/update). App installed. |
@@ -232,7 +307,7 @@ railway up
 - app_subscriptions/update webhook syncs plan changes to local DB
 - Descriptions wrapped in `<p>` tags for `descriptionHtml`. Claude returns plain text.
 - Description/SEO fields are optional in VisionResult. Scans succeed even if Claude omits them.
-- V1 simplifications: No revert button, no settings page, basic taxonomy validation, no multi-language
+- Remaining simplifications: basic taxonomy validation, no custom prompts, no per-collection tag schemas. (Revert, multi-language and the settings page have since shipped.)
 
 ## Business Metrics
 - **North star**: Active merchants who have run at least one scan

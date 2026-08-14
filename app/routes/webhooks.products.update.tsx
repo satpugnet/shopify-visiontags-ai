@@ -9,6 +9,7 @@ import * as Sentry from "@sentry/remix";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { queueProductAnalysis } from "../services/queue.server";
+import { readTagSchema, writeTagSchema } from "../services/tagSchema.server";
 import { hasAvailableCredits, consumeCredits } from "../services/billing.server";
 import { logger } from "../services/logger.server";
 
@@ -93,12 +94,18 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return new Response();
     }
 
-    // Create a new job for this product update
+    // Create a new job for this product update.
+    // Tag settings are snapshot here, like every other job creator: the worker
+    // reads tag config from the Job only, never from ShopSettings.
+    const autoTagSchema = readTagSchema(settings.tagSchema);
+
     const job = await prisma.job.create({
       data: {
         shop,
         status: "QUEUED",
         totalItems: 1,
+        tagFormat: settings.tagFormat === "KEY_VALUE" && autoTagSchema ? "KEY_VALUE" : "FREEFORM",
+        tagSchema: writeTagSchema(autoTagSchema),
       },
     });
 

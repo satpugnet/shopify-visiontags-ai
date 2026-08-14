@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { Prisma } from "@prisma/client";
+import type * as ProductsServer from "../../services/products.server";
 
 // Mock dependencies using vi.hoisted
 const mocks = vi.hoisted(() => ({
@@ -55,7 +57,11 @@ vi.mock("../../shopify.server", () => ({
   authenticate: mocks.authenticate,
 }));
 
-vi.mock("../../services/products.server", () => ({
+// Partial mock: only the Shopify-calling fetchers are stubbed. The tag-filter
+// helpers are pure and are exercised for real so the assertions below pin actual
+// filter behaviour rather than a stub's.
+vi.mock("../../services/products.server", async (importOriginal) => ({
+  ...(await importOriginal<typeof ProductsServer>()),
   fetchAllProducts: mocks.fetchAllProducts,
   fetchCollectionProducts: mocks.fetchCollectionProducts,
   countProducts: mocks.countProducts,
@@ -112,12 +118,15 @@ const mockJob = {
   totalItems: 2,
 };
 
-function createScanRequest(collection = "all", includeScanned = false) {
+function createScanRequest(collection = "all", includeScanned = false, tagFilter?: string) {
   const formData = new FormData();
   formData.append("action", "start-scan");
   formData.append("selectedCollection", collection);
   if (includeScanned) {
     formData.append("includeScanned", "true");
+  }
+  if (tagFilter) {
+    formData.append("tagFilter", tagFilter);
   }
   return new Request("https://app.example.com/app", {
     method: "POST",
@@ -188,6 +197,9 @@ describe("app._index action", () => {
         status: "QUEUED",
         totalItems: 2,
         industry: "general",
+        tagFormat: "FREEFORM",
+        tagSchema: Prisma.DbNull,
+        tagFilter: null,
       },
     });
     expect(mocks.queueBulkAnalysis).toHaveBeenCalledWith(
@@ -200,6 +212,65 @@ describe("app._index action", () => {
       "general",
       "English",
       "Test Store",
+    );
+  });
+
+  it("passes the tag filter through to the fetcher and records it on the job", async () => {
+    mocks.fetchAllProducts.mockResolvedValue(mockProducts);
+    mocks.hasAvailableCredits.mockResolvedValue({ allowed: true });
+    mocks.prisma.job.create.mockResolvedValue(mockJob);
+    mocks.prisma.$transaction.mockResolvedValue([{}, {}]);
+    mocks.queueBulkAnalysis.mockResolvedValue(undefined);
+    mocks.consumeCredits.mockResolvedValue({ success: true, remaining: 48 });
+
+    await action({
+      request: createScanRequest("all", false, "MISSING_KEY:Color"),
+    } as any);
+
+    expect(mocks.fetchAllProducts).toHaveBeenCalledWith(
+      mockAdmin,
+      50,
+      expect.objectContaining({ tagFilter: { kind: "MISSING_KEY", key: "Color" } }),
+    );
+    expect(mocks.prisma.job.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ tagFilter: "MISSING_KEY:Color" }),
+      }),
+    );
+  });
+
+  it("explains an empty result in terms of the tag filter, not the scan ledger", async () => {
+    mocks.fetchAllProducts.mockResolvedValue([]);
+    mocks.prisma.scannedProduct.findMany.mockResolvedValue([
+      { productId: "gid://shopify/Product/1" },
+    ]);
+
+    const response = await action({
+      request: createScanRequest("all", false, "UNTAGGED"),
+    } as any);
+    const data = await response.json();
+
+    expect(data.success).toBe(false);
+    expect(data.error).toContain("products with no tags");
+    expect(data.error).not.toContain("already been scanned");
+  });
+
+  it("falls back to ANY for an unrecognised tag filter rather than failing the scan", async () => {
+    mocks.fetchAllProducts.mockResolvedValue(mockProducts);
+    mocks.hasAvailableCredits.mockResolvedValue({ allowed: true });
+    mocks.prisma.job.create.mockResolvedValue(mockJob);
+    mocks.prisma.$transaction.mockResolvedValue([{}, {}]);
+    mocks.queueBulkAnalysis.mockResolvedValue(undefined);
+    mocks.consumeCredits.mockResolvedValue({ success: true, remaining: 48 });
+
+    await action({
+      request: createScanRequest("all", false, "NONSENSE"),
+    } as any);
+
+    expect(mocks.fetchAllProducts).toHaveBeenCalledWith(
+      mockAdmin,
+      50,
+      expect.objectContaining({ tagFilter: { kind: "ANY" } }),
     );
   });
 
@@ -258,7 +329,7 @@ describe("app._index action", () => {
       mockAdmin,
       collectionGid,
       50,
-      { excludeIds: undefined },
+      expect.objectContaining({ excludeIds: undefined, tagFilter: { kind: "ANY" } }),
     );
     expect(mocks.fetchAllProducts).not.toHaveBeenCalled();
   });
@@ -294,7 +365,7 @@ describe("app._index action", () => {
       expect(mocks.fetchAllProducts).toHaveBeenCalledWith(
         mockAdmin,
         expectedLimit,
-        { excludeIds: undefined },
+        expect.objectContaining({ excludeIds: undefined, tagFilter: { kind: "ANY" } }),
       );
     }
   });
@@ -317,9 +388,10 @@ describe("app._index action", () => {
 
     await action({ request: createScanRequest() } as any);
 
-    expect(mocks.fetchAllProducts).toHaveBeenCalledWith(mockAdmin, 10, {
+    expect(mocks.fetchAllProducts).toHaveBeenCalledWith(mockAdmin, 10, expect.objectContaining({
       excludeIds: undefined,
-    });
+      tagFilter: { kind: "ANY" },
+    }));
   });
 
   it("returns credit error before fetching when no credits remain", async () => {
@@ -355,12 +427,13 @@ describe("app._index action", () => {
 
     await action({ request: createScanRequest() } as any);
 
-    expect(mocks.fetchAllProducts).toHaveBeenCalledWith(mockAdmin, 50, {
+    expect(mocks.fetchAllProducts).toHaveBeenCalledWith(mockAdmin, 50, expect.objectContaining({
       excludeIds: new Set([
         "gid://shopify/Product/1",
         "gid://shopify/Product/9",
       ]),
-    });
+      tagFilter: { kind: "ANY" },
+    }));
   });
 
   it("bypasses the ledger when includeScanned is set", async () => {
@@ -377,9 +450,10 @@ describe("app._index action", () => {
     await action({ request: createScanRequest("all", true) } as any);
 
     expect(mocks.prisma.scannedProduct.findMany).not.toHaveBeenCalled();
-    expect(mocks.fetchAllProducts).toHaveBeenCalledWith(mockAdmin, 50, {
+    expect(mocks.fetchAllProducts).toHaveBeenCalledWith(mockAdmin, 50, expect.objectContaining({
       excludeIds: undefined,
-    });
+      tagFilter: { kind: "ANY" },
+    }));
   });
 
   it("returns all-scanned message when every product is already in the ledger", async () => {

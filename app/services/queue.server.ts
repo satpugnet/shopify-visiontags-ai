@@ -5,7 +5,9 @@
 
 import { Queue, Worker, type Job as BullJob } from "bullmq";
 import * as Sentry from "@sentry/remix";
+import { Prisma } from "@prisma/client";
 import { analyzeProductImage, isVisionError } from "./vision.server";
+import { readTagSchema } from "./tagSchema.server";
 import { extractProductGid } from "./products.server";
 import { logger } from "./logger.server";
 import prisma from "../db.server";
@@ -198,9 +200,14 @@ export function startAnalysisWorker(): Worker<AnalysisJobData> {
 
       logger.info("PRODUCT_ANALYSIS_STARTED", { shop, jobId, productId, industryId });
 
-      // Check if product still exists before doing expensive API call
+      // Check if product still exists before doing expensive API call.
+      // The job is included on the same read so the tag schema arrives for free:
+      // it is snapshot on the Job at scan start, never read live from
+      // ShopSettings, so a mid-run settings change cannot split one job across
+      // two schema versions.
       const productRecord = await prisma.product.findUnique({
         where: { id: productId },
+        include: { job: { select: { tagFormat: true, tagSchema: true } } },
       });
 
       if (!productRecord) {
@@ -223,7 +230,20 @@ export function startAnalysisWorker(): Worker<AnalysisJobData> {
           level: "info",
         });
 
-        const result = await analyzeProductImage(imageUrl, industryId, productTitle, language, storeName, vendor);
+        const tagSchema =
+          productRecord.job?.tagFormat === "KEY_VALUE"
+            ? readTagSchema(productRecord.job.tagSchema)
+            : null;
+
+        const result = await analyzeProductImage({
+          imageUrl,
+          industryId,
+          productTitle,
+          language,
+          storeName,
+          vendor,
+          tagSchema,
+        });
 
         // Update the product in database (wrapped in try-catch for race conditions)
         try {
@@ -254,6 +274,10 @@ export function startAnalysisWorker(): Worker<AnalysisJobData> {
                 status: "ANALYZED",
                 suggestedMetafields: metafieldsWithAlt,
                 suggestedTags: result.tags,
+                // Captured now because it cannot be reconstructed later without
+                // re-running the analysis: this is what powers "the AI proposed
+                // N values your schema doesn't allow".
+                rejectedTagAttributes: result.rejected_tag_attributes ?? Prisma.DbNull,
                 suggestedDescription: result.description,
                 suggestedSeoTitle: result.seo_title,
                 suggestedMetaDescription: result.meta_description,

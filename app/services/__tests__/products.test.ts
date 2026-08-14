@@ -833,3 +833,296 @@ describe("fetchAllProducts with excludeIds", () => {
     expect(admin.graphql).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("tag filter parsing and serialization", () => {
+  it("round-trips every filter kind", async () => {
+    const { parseTagFilter, serializeTagFilter } = await import("../products.server");
+
+    expect(serializeTagFilter(parseTagFilter("UNTAGGED"))).toBe("UNTAGGED");
+    expect(serializeTagFilter(parseTagFilter("TAGGED"))).toBe("TAGGED");
+    expect(serializeTagFilter(parseTagFilter("MISSING_KEY:Color"))).toBe("MISSING_KEY:Color");
+    // ANY is the absence of a filter, stored as null.
+    expect(serializeTagFilter(parseTagFilter("ANY"))).toBeNull();
+  });
+
+  it("degrades unknown or empty input to ANY instead of throwing", async () => {
+    const { parseTagFilter } = await import("../products.server");
+
+    expect(parseTagFilter(null)).toEqual({ kind: "ANY" });
+    expect(parseTagFilter("")).toEqual({ kind: "ANY" });
+    expect(parseTagFilter("garbage")).toEqual({ kind: "ANY" });
+    expect(parseTagFilter("MISSING_KEY:")).toEqual({ kind: "ANY" });
+  });
+
+  it("describes each filter for merchant-facing copy", async () => {
+    const { parseTagFilter, describeTagFilter } = await import("../products.server");
+
+    expect(describeTagFilter(parseTagFilter("UNTAGGED"))).toBe("products with no tags");
+    expect(describeTagFilter(parseTagFilter("MISSING_KEY:Color"))).toBe(
+      "products with no Color: tag",
+    );
+  });
+});
+
+describe("fetchAllProducts with a tag filter", () => {
+  function makePage(
+    products: Array<{ id: number; tags: string[] }>,
+    hasNextPage: boolean,
+  ) {
+    return {
+      data: {
+        products: {
+          edges: products.map((p) => ({
+            cursor: `cursor${p.id}`,
+            node: {
+              id: `gid://shopify/Product/${p.id}`,
+              title: `Product ${p.id}`,
+              vendor: "TestBrand",
+              featuredImage: { url: `https://cdn.shopify.com/${p.id}.jpg` },
+              productType: "Apparel",
+              tags: p.tags,
+              category: null,
+            },
+          })),
+          pageInfo: { hasNextPage },
+        },
+      },
+    };
+  }
+
+  function createMockAdmin(responses: Array<unknown>) {
+    let callIndex = 0;
+    return {
+      graphql: vi.fn().mockImplementation(() => ({
+        json: async () => responses[callIndex++] || responses[responses.length - 1],
+      })),
+    };
+  }
+
+  it("keeps only untagged products", async () => {
+    const admin = createMockAdmin([
+      makePage([{ id: 1, tags: [] }, { id: 2, tags: ["SS24"] }], false),
+    ]);
+    const { fetchAllProducts, parseTagFilter } = await import("../products.server");
+
+    const products = await fetchAllProducts(admin as any, 10, {
+      tagFilter: parseTagFilter("UNTAGGED"),
+    });
+
+    expect(products.map((p) => p.id)).toEqual(["gid://shopify/Product/1"]);
+  });
+
+  it("keeps only already-tagged products", async () => {
+    const admin = createMockAdmin([
+      makePage([{ id: 1, tags: [] }, { id: 2, tags: ["SS24"] }], false),
+    ]);
+    const { fetchAllProducts, parseTagFilter } = await import("../products.server");
+
+    const products = await fetchAllProducts(admin as any, 10, {
+      tagFilter: parseTagFilter("TAGGED"),
+    });
+
+    expect(products.map((p) => p.id)).toEqual(["gid://shopify/Product/2"]);
+  });
+
+  it("keeps products missing a given key, including products with other tags", async () => {
+    const admin = createMockAdmin([
+      makePage(
+        [
+          { id: 1, tags: ["Color:Black", "SS24"] },
+          { id: 2, tags: ["SS24"] },
+          { id: 3, tags: [] },
+          { id: 4, tags: ["color:navy"] },
+        ],
+        false,
+      ),
+    ]);
+    const { fetchAllProducts, parseTagFilter } = await import("../products.server");
+
+    const products = await fetchAllProducts(admin as any, 10, {
+      tagFilter: parseTagFilter("MISSING_KEY:Color"),
+    });
+
+    // 1 and 4 already carry a Color: tag (match is case-insensitive).
+    expect(products.map((p) => p.id)).toEqual([
+      "gid://shopify/Product/2",
+      "gid://shopify/Product/3",
+    ]);
+  });
+
+  it("narrows server-side for the two literal filters", async () => {
+    const admin = createMockAdmin([makePage([{ id: 1, tags: [] }], false)]);
+    const { fetchAllProducts, parseTagFilter } = await import("../products.server");
+
+    await fetchAllProducts(admin as any, 10, { tagFilter: parseTagFilter("UNTAGGED") });
+
+    expect(admin.graphql).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ variables: expect.objectContaining({ query: "-tag:*" }) }),
+    );
+  });
+
+  it("sends no search query for MISSING_KEY, which Shopify cannot express", async () => {
+    const admin = createMockAdmin([makePage([{ id: 1, tags: [] }], false)]);
+    const { fetchAllProducts, parseTagFilter } = await import("../products.server");
+
+    await fetchAllProducts(admin as any, 10, {
+      tagFilter: parseTagFilter("MISSING_KEY:Color"),
+    });
+
+    expect(admin.graphql).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ variables: expect.objectContaining({ query: null }) }),
+    );
+  });
+
+  it("keeps paginating past pages the filter empties", async () => {
+    const admin = createMockAdmin([
+      makePage([{ id: 1, tags: ["SS24"] }, { id: 2, tags: ["SS24"] }], true),
+      makePage([{ id: 3, tags: [] }], false),
+    ]);
+    const { fetchAllProducts, parseTagFilter } = await import("../products.server");
+
+    const products = await fetchAllProducts(admin as any, 1, {
+      tagFilter: parseTagFilter("UNTAGGED"),
+    });
+
+    expect(admin.graphql).toHaveBeenCalledTimes(2);
+    expect(products.map((p) => p.id)).toEqual(["gid://shopify/Product/3"]);
+  });
+
+  it("reports a partial batch when catalog remains but the limit was not filled", async () => {
+    const admin = createMockAdmin([makePage([{ id: 1, tags: [] }], true)]);
+    const { fetchAllProducts, parseTagFilter } = await import("../products.server");
+    const onBudgetExhausted = vi.fn();
+
+    // Page says hasNextPage, but the mock keeps returning the same page, so the
+    // walk ends on the page budget rather than on an exhausted catalog.
+    await fetchAllProducts(admin as any, 500, {
+      tagFilter: parseTagFilter("UNTAGGED"),
+      excludeIds: new Set(["gid://shopify/Product/1"]),
+      onBudgetExhausted,
+    });
+
+    expect(onBudgetExhausted).toHaveBeenCalled();
+  });
+});
+
+describe("tag filter server-side narrowing fallback", () => {
+  function page(products: Array<{ id: number; tags: string[] }>, hasNextPage: boolean) {
+    return {
+      data: {
+        products: {
+          edges: products.map((p) => ({
+            cursor: `cursor${p.id}`,
+            node: {
+              id: `gid://shopify/Product/${p.id}`,
+              title: `Product ${p.id}`,
+              vendor: "TestBrand",
+              featuredImage: { url: `https://cdn.shopify.com/${p.id}.jpg` },
+              productType: "Apparel",
+              tags: p.tags,
+              category: null,
+            },
+          })),
+          pageInfo: { hasNextPage },
+        },
+      },
+    };
+  }
+
+  it("retries without the search query when Shopify rejects it", async () => {
+    // Simulates the search syntax being rejected: the response carries errors and
+    // no products payload, so the walk must fall back to filtering client-side
+    // rather than reporting "no products match".
+    const admin = {
+      graphql: vi.fn().mockImplementation((_query: string, opts: any) => ({
+        json: async () =>
+          opts?.variables?.query
+            ? { errors: [{ message: "Invalid search field: tag" }] }
+            : page([{ id: 1, tags: [] }, { id: 2, tags: ["SS24"] }], false),
+      })),
+    };
+    const { fetchAllProducts, parseTagFilter } = await import("../products.server");
+
+    const products = await fetchAllProducts(admin as any, 10, {
+      tagFilter: parseTagFilter("UNTAGGED"),
+    });
+
+    // Fell back and still applied the filter correctly.
+    expect(products.map((p) => p.id)).toEqual(["gid://shopify/Product/1"]);
+    expect(admin.graphql).toHaveBeenCalledTimes(2);
+    expect(admin.graphql).toHaveBeenLastCalledWith(
+      expect.any(String),
+      expect.objectContaining({ variables: expect.objectContaining({ query: null }) }),
+    );
+  });
+
+  it("does not retry when the filter legitimately matches nothing", async () => {
+    // "-tag:*" on a fully tagged catalog is a valid query with an empty result.
+    // Treating that as broken syntax would walk the whole catalog to rediscover
+    // the same emptiness, then tell the merchant to run the scan again.
+    const admin = {
+      graphql: vi.fn().mockImplementation(() => ({ json: async () => page([], false) })),
+    };
+    const { fetchAllProducts, parseTagFilter } = await import("../products.server");
+
+    const products = await fetchAllProducts(admin as any, 10, {
+      tagFilter: parseTagFilter("UNTAGGED"),
+    });
+
+    expect(products).toEqual([]);
+    expect(admin.graphql).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("partial-batch reporting", () => {
+  function page(ids: number[], hasNextPage: boolean) {
+    return {
+      data: {
+        products: {
+          edges: ids.map((id) => ({
+            cursor: `cursor${id}`,
+            node: {
+              id: `gid://shopify/Product/${id}`,
+              title: `Product ${id}`,
+              vendor: "TestBrand",
+              featuredImage: { url: `https://cdn.shopify.com/${id}.jpg` },
+              productType: "Apparel",
+              tags: [],
+              category: null,
+            },
+          })),
+          pageInfo: { hasNextPage },
+        },
+      },
+    };
+  }
+
+  it("does not report a partial batch when the catalog is exhausted", async () => {
+    const admin = {
+      graphql: vi.fn().mockImplementation(() => ({ json: async () => page([1], false) })),
+    };
+    const { fetchAllProducts } = await import("../products.server");
+    const onBudgetExhausted = vi.fn();
+
+    await fetchAllProducts(admin as any, 500, { onBudgetExhausted });
+
+    expect(onBudgetExhausted).not.toHaveBeenCalled();
+  });
+
+  it("does not report a partial batch when an empty page ends the walk", async () => {
+    let call = 0;
+    const admin = {
+      graphql: vi.fn().mockImplementation(() => ({
+        json: async () => (call++ === 0 ? page([1], true) : page([], true)),
+      })),
+    };
+    const { fetchAllProducts } = await import("../products.server");
+    const onBudgetExhausted = vi.fn();
+
+    await fetchAllProducts(admin as any, 500, { onBudgetExhausted });
+
+    expect(onBudgetExhausted).not.toHaveBeenCalled();
+  });
+});

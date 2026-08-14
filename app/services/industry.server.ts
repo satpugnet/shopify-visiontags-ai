@@ -4,6 +4,8 @@
  * industry-specific AI prompts and metafield configurations.
  */
 
+import { buildTagPromptFragment, isUsableTagSchema, type TagSchema } from "./tagSchema";
+
 export interface IndustryConfig {
   id: string;
   name: string;
@@ -178,14 +180,35 @@ export function buildVisionPrompt(
   industryId: string,
   language?: string,
   storeName?: string,
+  tagSchema?: TagSchema | null,
 ): string {
   const config = INDUSTRIES[industryId] || INDUSTRIES.general;
   const lang = language || "English";
   const store = storeName || "an e-commerce store";
+  const schema = isUsableTagSchema(tagSchema) ? tagSchema : null;
 
   const metafieldEntries = Object.entries(config.metafieldKeys)
     .map(([key, info]) => `    "${key}": "${info.description} (e.g., ${info.examples.slice(0, 3).join(", ")})"`)
     .join(",\n");
+
+  // With a merchant tag schema, tags come back as a structured object that is
+  // snapped onto their vocabulary afterwards, rather than as free-form phrases.
+  const tagsLine = schema
+    ? `  "tag_attributes": { "Key": "Value" },`
+    : `  "tags": ["Title Case tags mixing factual attributes and discovery keywords"],`;
+
+  const tagsRule = schema
+    ? `2. Tags: see the TAG ATTRIBUTES section below. Do NOT return a "tags" field.`
+    : `2. Tags: Title Case, mix of factual attributes and discovery keywords.`;
+
+  // Rule 6 tells the model to write everything in the merchant's language. Tag
+  // attributes are the one exception: they are the merchant's own vocabulary, and
+  // a translated key or value would be rejected during normalization.
+  const languageRule = schema
+    ? `6. Write in ${lang}. All text fields (description, seo_title, meta_description, alt_text) must be in ${lang}. The keys and values in tag_attributes are the ONLY exception: leave them exactly as given.`
+    : `6. Write in ${lang}. All text fields (description, seo_title, meta_description, alt_text, tags) must be in ${lang}.`;
+
+  const tagSchemaSection = schema ? `\n\n${buildTagPromptFragment(schema)}` : "";
 
   return `You are writing product content for ${store}.
 Write ALL output in ${lang}.
@@ -198,7 +221,7 @@ Analyze the product image and return JSON:
   "metafields": {
 ${metafieldEntries}
   },
-  "tags": ["Title Case tags mixing factual attributes and discovery keywords"],
+${tagsLine}
   "alt_text": "Describe what is visible in the image. Max 125 chars.",
   "description": "2-4 sentences. Describe THIS specific product, not a generic category. Preserve the brand name, model name, and any collaboration names from the product title. Mention specific visual details from the image (colors, textures, design elements). No filler phrases. Plain text only, no HTML.",
   "seo_title": "Max 60 chars. Keep the brand and model name from the product title. Format: [Brand] [Model] [Product Type].",
@@ -207,12 +230,12 @@ ${metafieldEntries}
 
 RULES:
 1. Only include metafield keys where you can make a confident visual assessment.
-2. Tags: Title Case, mix of factual attributes and discovery keywords.
+${tagsRule}
 3. alt_text: Describe what is visible in the image. Max 125 characters.
 4. NEVER use these phrases: "perfect for", "ideal for", "everyday wear", "versatile addition", "any wardrobe", "statement-making", "eye-catching", "must-have", "elevate your". Be specific, not generic.
 5. Preserve brand names, model names, and collaboration names from the product title in the description and SEO title. Do not replace them with generic terms.
-6. Write in ${lang}. All text fields (description, seo_title, meta_description, alt_text, tags) must be in ${lang}.
-7. Return valid JSON only. No markdown, no explanation.`;
+${languageRule}
+7. Return valid JSON only. No markdown, no explanation.${tagSchemaSection}`;
 }
 
 /**

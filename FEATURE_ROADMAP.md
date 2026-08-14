@@ -155,6 +155,13 @@ These features are table stakes that competitors already have or that cost nearl
 
 ### 1.2 Settings Page + Custom AI Prompts
 
+**Status (Aug 14, 2026): PARTIALLY SHIPPED.** `app/routes/app.settings.tsx` exists and
+is in the nav. It ships the tag-format choice and the merchant-defined `Key:Value`
+tag schema (keys plus optional allowed values), backed by dedicated
+`ShopSettings.tagFormat` / `tagSchema` columns rather than a generic `preferences`
+blob. Still open from the list below: auto-sync toggle UI, custom prompt text area,
+metafield selection, description tone.
+
 **What:** A settings page where merchants can:
 - Toggle auto-sync on/off (this is a Pro feature with NO UI currently)
 - Write custom instructions for the AI (brand voice, specific keywords, things to ignore)

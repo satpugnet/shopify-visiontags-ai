@@ -34,6 +34,15 @@ model Job {
   shop         String
   collectionId String?
   industry     String?
+  // Tag settings are SNAPSHOT here at scan start rather than read live from
+  // ShopSettings. The worker rebuilds prompts out of process and "retry failed"
+  // re-runs against the same job, so a live read would let one job span two
+  // schema versions - after which the apply step can no longer tell which tag
+  // keys it owns. Every Job creator snapshots; the worker reads Job only.
+  tagFormat    String    @default("FREEFORM") // FREEFORM | KEY_VALUE
+  tagSchema    Json?
+  // ANY | UNTAGGED | TAGGED | MISSING_KEY:<Key>
+  tagFilter    String?
   status       String    @default("QUEUED")
   totalItems   Int       @default(0)
   processed    Int       @default(0)
@@ -46,14 +55,14 @@ model Job {
 }
 
 model Product {
-  id                  String    @id
-  jobId               String
-  title               String
-  imageUrl            String
-  currentCategory     String?
-  currentMetafields   Json?
-  currentTags         String?
-  suggestedMetafields Json?
+  id                       String    @id
+  jobId                    String
+  title                    String
+  imageUrl                 String
+  currentCategory          String?
+  currentMetafields        Json?
+  currentTags              String?
+  suggestedMetafields      Json?
   suggestedTags            Json?
   suggestedDescription     String?
   suggestedSeoTitle        String?
@@ -61,11 +70,19 @@ model Product {
   originalDescription      String?
   originalSeoTitle         String?
   originalMetaDescription  String?
-  syncedAt            DateTime?
-  status              String    @default("PENDING")
-  error               String?
-  createdAt           DateTime  @default(now())
-  job                 Job       @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  // The exact tag list last written to Shopify. Client-side tag edits are merged
+  // at apply time and never persisted, so suggestedTags is NOT what was written -
+  // without this, a correct revert of a merged apply is not computable.
+  appliedTags              Json?
+  // Values the AI proposed that the merchant's tag schema rejected, keyed by
+  // schema key. Captured at analysis time because it cannot be backfilled later
+  // without re-running the whole scan.
+  rejectedTagAttributes    Json?
+  syncedAt                 DateTime?
+  status                   String    @default("PENDING")
+  error                    String?
+  createdAt                DateTime  @default(now())
+  job                      Job       @relation(fields: [jobId], references: [id], onDelete: Cascade)
 
   @@index([jobId])
   @@index([status])
@@ -77,6 +94,10 @@ model ShopSettings {
   plan                String    @default("FREE")
   industry            String?
   language            String    @default("auto")
+  // Merchant-defined tag output. FREEFORM keeps the original phrase-style tags;
+  // KEY_VALUE drives tags from tagSchema (see app/services/tagSchema.server.ts).
+  tagFormat           String    @default("FREEFORM")
+  tagSchema           Json?
   creditsUsed         Int       @default(0)
   creditLimit         Int       @default(50)
   billingPeriodStart  DateTime  @default(now())

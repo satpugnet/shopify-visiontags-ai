@@ -8,6 +8,11 @@ import * as Sentry from "@sentry/remix";
 import { logger } from "./logger.server";
 import { withRetry } from "./retry.server";
 import { buildVisionPrompt } from "./industry.server";
+import {
+  isUsableTagSchema,
+  normalizeTagAttributes,
+  type TagSchema,
+} from "./tagSchema";
 
 // Initialize Anthropic client via OpenRouter's Anthropic Skin
 const anthropic = new Anthropic({
@@ -22,10 +27,30 @@ const anthropic = new Anthropic({
 export interface VisionResult {
   metafields: Record<string, string | null>;
   tags: string[];
+  /**
+   * Raw Key/Value attributes, only requested when the merchant has a tag schema.
+   * Asking for an object rather than pre-joined "Key:Value" strings keeps the
+   * separator out of the model's hands. Normalized into `tags` before this
+   * result leaves the service, so everything downstream still sees a flat list.
+   */
+  tag_attributes?: Record<string, unknown>;
+  /** Values the model proposed that the merchant's schema rejected. */
+  rejected_tag_attributes?: Record<string, string[]>;
   alt_text?: string;
   description?: string;
   seo_title?: string;
   meta_description?: string;
+}
+
+export interface AnalyzeProductImageOptions {
+  imageUrl: string;
+  industryId?: string;
+  productTitle?: string;
+  language?: string;
+  storeName?: string;
+  vendor?: string;
+  /** When set (and non-empty), tags are emitted as Key:Value pairs from this schema. */
+  tagSchema?: TagSchema | null;
 }
 
 export interface VisionError {
@@ -103,18 +128,32 @@ function optimizeImageUrl(imageUrl: string): string {
 }
 
 /**
+ * Snap the model's raw tag_attributes onto the merchant's vocabulary and flatten
+ * them into the flat `tags` list the rest of the app expects.
+ */
+function applyTagSchema(
+  schema: TagSchema,
+  attributes: Record<string, unknown>,
+): Pick<VisionResult, "tags" | "tag_attributes" | "rejected_tag_attributes"> {
+  const { tags, rejected } = normalizeTagAttributes(schema, attributes);
+  return {
+    tags,
+    tag_attributes: attributes,
+    rejected_tag_attributes: Object.keys(rejected).length > 0 ? rejected : undefined,
+  };
+}
+
+/**
  * Analyze a product image using Claude Vision
  * Includes retry logic for rate limits and transient errors
  */
 export async function analyzeProductImage(
-  imageUrl: string,
-  industryId?: string,
-  productTitle?: string,
-  language?: string,
-  storeName?: string,
-  vendor?: string,
+  options: AnalyzeProductImageOptions,
 ): Promise<VisionResponse> {
-  let prompt = buildVisionPrompt(industryId || "general", language, storeName);
+  const { imageUrl, industryId, productTitle, language, storeName, vendor } = options;
+  const tagSchema = isUsableTagSchema(options.tagSchema) ? options.tagSchema : null;
+
+  let prompt = buildVisionPrompt(industryId || "general", language, storeName, tagSchema);
 
   // Prepend product-level context
   const contextLines: string[] = [];
@@ -128,17 +167,27 @@ export async function analyzeProductImage(
     prompt = `${contextLines.join("\n")}\n\n${prompt}`;
   }
 
-  // Dry run mode for stress testing (skips real API call)
+  // Dry run mode for stress testing (skips real API call).
+  // Mirrors the real response shape for the active tag mode, otherwise a dry run
+  // would silently exercise the free-form path and hide normalization bugs.
   if (process.env.VISION_DRY_RUN === "true") {
     await new Promise((r) => setTimeout(r, 200));
-    return {
+    const base = {
       metafields: { color: "Test Blue", material: "Cotton", product_type: "T-Shirt" },
-      tags: ["Test", "Dry Run", "Stress Test"],
       alt_text: "Dry run test image",
       description: "This is a dry run test product description.",
       seo_title: "Test Product - Dry Run",
       meta_description: "Dry run test meta description for stress testing.",
     };
+    if (tagSchema) {
+      // Answer with the first allowed value of each key, as a real scan would.
+      const attributes: Record<string, string> = {};
+      for (const key of tagSchema.keys) {
+        attributes[key.key] = key.values[0]?.value ?? "Dry Run";
+      }
+      return { ...base, ...applyTagSchema(tagSchema, attributes) };
+    }
+    return { ...base, tags: ["Test", "Dry Run", "Stress Test"] };
   }
 
   try {
@@ -150,7 +199,9 @@ export async function analyzeProductImage(
       () =>
         anthropic.messages.create({
           model: "anthropic/claude-haiku-4.5",
-          max_tokens: 1024,
+          // A cap, not a charge. Headroom so a merchant tag schema with many keys
+          // cannot truncate the JSON, which would surface only as a PARSE_ERROR.
+          max_tokens: 2048,
           messages: [
             {
               role: "user",
@@ -190,8 +241,27 @@ export async function analyzeProductImage(
       const cleanedText = stripMarkdownCodeBlocks(textContent.text);
       const result = JSON.parse(cleanedText) as VisionResult;
 
-      // Validate structure
-      if (!result.metafields || !result.tags) {
+      // Validate structure. Which tag field is required depends on the mode: in
+      // Key:Value mode the model is asked for tag_attributes and returns no
+      // `tags` key at all.
+      if (!result.metafields) {
+        return {
+          error: "Invalid response structure",
+          code: "PARSE_ERROR",
+        };
+      }
+
+      if (tagSchema) {
+        if (!result.tag_attributes) {
+          return {
+            error: "Invalid response structure",
+            code: "PARSE_ERROR",
+          };
+        }
+        return { ...result, ...applyTagSchema(tagSchema, result.tag_attributes) };
+      }
+
+      if (!result.tags) {
         return {
           error: "Invalid response structure",
           code: "PARSE_ERROR",
@@ -258,7 +328,7 @@ export async function analyzeProductImages(
   const results = new Map<string, VisionResponse>();
 
   for (const url of imageUrls) {
-    const result = await analyzeProductImage(url, industryId);
+    const result = await analyzeProductImage({ imageUrl: url, industryId });
     results.set(url, result);
 
     // Small delay between requests to avoid rate limiting

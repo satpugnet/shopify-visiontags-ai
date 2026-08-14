@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { Prisma } from "@prisma/client";
 
 // Mock dependencies using vi.hoisted
 const mocks = vi.hoisted(() => ({
@@ -28,7 +29,7 @@ const mocks = vi.hoisted(() => ({
   updateProductTags: vi.fn(),
   updateProductImageAlt: vi.fn(),
   updateProductDescriptionAndSeo: vi.fn(),
-  fetchProductDescriptionAndSeo: vi.fn(),
+  fetchProductSyncState: vi.fn(),
   queueBulkAnalysis: vi.fn(),
   consumeCredits: vi.fn(),
 }));
@@ -50,7 +51,7 @@ vi.mock("../../services/products.server", () => ({
   updateProductTags: mocks.updateProductTags,
   updateProductImageAlt: mocks.updateProductImageAlt,
   updateProductDescriptionAndSeo: mocks.updateProductDescriptionAndSeo,
-  fetchProductDescriptionAndSeo: mocks.fetchProductDescriptionAndSeo,
+  fetchProductSyncState: mocks.fetchProductSyncState,
 }));
 
 vi.mock("../../services/queue.server", () => ({
@@ -135,8 +136,9 @@ beforeEach(() => {
   mocks.prisma.$transaction.mockResolvedValue([]);
   mocks.prisma.shopSettings.findUnique.mockResolvedValue({ language: "auto" });
   mocks.queueBulkAnalysis.mockResolvedValue(undefined);
-  // Default: fetchProductDescriptionAndSeo returns empty originals
-  mocks.fetchProductDescriptionAndSeo.mockResolvedValue({
+  // Default: the product has no live tags and no originals to preserve
+  mocks.fetchProductSyncState.mockResolvedValue({
+    tags: [],
     descriptionHtml: null,
     seoTitle: null,
     metaDescription: null,
@@ -435,6 +437,8 @@ describe("app.jobs.$id action - shop scoping and selectAll auto-chain", () => {
     expect(mocks.prisma.product.update).toHaveBeenCalledWith({
       where: { id: "gid://shopify/Product/1" },
       data: {
+        appliedTags: ["blue", "cotton", "t-shirt", "apparel"],
+        currentTags: "",
         status: "SYNCED",
         syncedAt: expect.any(Date),
         error: null,
@@ -442,7 +446,7 @@ describe("app.jobs.$id action - shop scoping and selectAll auto-chain", () => {
     });
   });
 
-  it("skips the originals pre-read when originals were already captured", async () => {
+  it("skips the live pre-read when originals are captured and tags are not syncing", async () => {
     mocks.prisma.product.findUnique.mockResolvedValue({
       ...mockAnalyzedProduct,
       originalDescription: "<p>Original</p>",
@@ -456,11 +460,127 @@ describe("app.jobs.$id action - shop scoping and selectAll auto-chain", () => {
     mocks.prisma.shopSettings.update.mockResolvedValue({});
 
     await action({
-      request: createSyncRequest(["gid://shopify/Product/1"]),
+      request: createSyncRequest(["gid://shopify/Product/1"], { syncTags: false }),
       params: { id: "job-123" },
     } as any);
 
-    expect(mocks.fetchProductDescriptionAndSeo).not.toHaveBeenCalled();
+    expect(mocks.fetchProductSyncState).not.toHaveBeenCalled();
+  });
+
+  it("still pre-reads when tags are syncing, because the merge needs live tags", async () => {
+    mocks.prisma.product.findUnique.mockResolvedValue({
+      ...mockAnalyzedProduct,
+      originalDescription: "<p>Original</p>",
+    });
+    mocks.updateProductMetafields.mockResolvedValue({ success: true });
+    mocks.updateProductTags.mockResolvedValue({ success: true });
+    mocks.updateProductImageAlt.mockResolvedValue({ success: true });
+    mocks.updateProductDescriptionAndSeo.mockResolvedValue({ success: true });
+    mocks.prisma.product.update.mockResolvedValue({});
+
+    await action({
+      request: createSyncRequest(["gid://shopify/Product/1"], { syncTags: true }),
+      params: { id: "job-123" },
+    } as any);
+
+    expect(mocks.fetchProductSyncState).toHaveBeenCalledWith(
+      mockAdmin,
+      "gid://shopify/Product/1",
+    );
+  });
+});
+
+describe("app.jobs.$id action - tag merge semantics", () => {
+  beforeEach(() => {
+    mocks.updateProductMetafields.mockResolvedValue({ success: true });
+    mocks.updateProductTags.mockResolvedValue({ success: true });
+    mocks.updateProductImageAlt.mockResolvedValue({ success: true });
+    mocks.updateProductDescriptionAndSeo.mockResolvedValue({ success: true });
+    mocks.prisma.product.update.mockResolvedValue({});
+  });
+
+  it("unions with the product's live tags in free-form mode, never wiping them", async () => {
+    mocks.prisma.product.findUnique.mockResolvedValue(mockAnalyzedProduct);
+    mocks.fetchProductSyncState.mockResolvedValue({
+      tags: ["SS24", "clearance"],
+      descriptionHtml: null,
+      seoTitle: null,
+      metaDescription: null,
+    });
+
+    await action({
+      request: createSyncRequest(["gid://shopify/Product/1"], {
+        syncMetafields: false,
+        syncTags: true,
+        syncAltText: false,
+        syncDescription: false,
+      }),
+      params: { id: "job-123" },
+    } as any);
+
+    expect(mocks.updateProductTags).toHaveBeenCalledWith(
+      mockAdmin,
+      "gid://shopify/Product/1",
+      ["SS24", "clearance", "blue", "cotton", "t-shirt", "apparel"],
+    );
+  });
+
+  it("replaces only schema-owned keys in Key:Value mode", async () => {
+    mocks.prisma.job.findFirst.mockResolvedValue({
+      id: "job-123",
+      shop: "test.myshopify.com",
+      status: "COMPLETED",
+      totalItems: 1,
+      processed: 1,
+      tagFormat: "KEY_VALUE",
+      tagSchema: { version: 1, keys: [{ key: "Color", values: ["Black", "Navy"] }] },
+    });
+    mocks.prisma.product.findUnique.mockResolvedValue({
+      ...mockAnalyzedProduct,
+      suggestedTags: ["Color:Navy"],
+    });
+    mocks.fetchProductSyncState.mockResolvedValue({
+      tags: ["Color:Black", "SS24", "clearance"],
+      descriptionHtml: null,
+      seoTitle: null,
+      metaDescription: null,
+    });
+
+    await action({
+      request: createSyncRequest(["gid://shopify/Product/1"], {
+        syncMetafields: false,
+        syncTags: true,
+        syncAltText: false,
+        syncDescription: false,
+      }),
+      params: { id: "job-123" },
+    } as any);
+
+    expect(mocks.updateProductTags).toHaveBeenCalledWith(
+      mockAdmin,
+      "gid://shopify/Product/1",
+      ["SS24", "clearance", "Color:Navy"],
+    );
+  });
+
+  it("refuses to write tags when the live tag read failed, rather than replacing", async () => {
+    mocks.prisma.product.findUnique.mockResolvedValue(mockAnalyzedProduct);
+    mocks.fetchProductSyncState.mockRejectedValue(new Error("Shopify unavailable"));
+
+    const response = await action({
+      request: createSyncRequest(["gid://shopify/Product/1"], {
+        syncMetafields: false,
+        syncTags: true,
+        syncAltText: false,
+        syncDescription: false,
+      }),
+      params: { id: "job-123" },
+    } as any);
+    const data = await response.json();
+
+    expect(mocks.updateProductTags).not.toHaveBeenCalled();
+    expect(data.errors).toBe(1);
+    expect(data.synced).toBe(0);
   });
 });
 
@@ -596,6 +716,163 @@ describe("app.jobs.$id action - retry-failed", () => {
     expect(mocks.prisma.job.update).toHaveBeenCalledWith({
       where: { id: "job-123" },
       data: { status: "FAILED" },
+    });
+  });
+});
+
+describe("app.jobs.$id action - revert-all", () => {
+  function createRevertRequest() {
+    const formData = new FormData();
+    formData.append("action", "revert-all");
+    return new Request("https://app.example.com/app/jobs/job-123", {
+      method: "POST",
+      body: formData,
+    });
+  }
+
+  beforeEach(() => {
+    mocks.updateProductMetafields.mockResolvedValue({ success: true });
+    mocks.updateProductTags.mockResolvedValue({ success: true });
+    mocks.updateProductDescriptionAndSeo.mockResolvedValue({ success: true });
+    mocks.prisma.product.update.mockResolvedValue({});
+  });
+
+  it("undoes only our delta, keeping tags the merchant added after apply", async () => {
+    mocks.prisma.product.findMany.mockResolvedValue([
+      {
+        id: "gid://shopify/Product/1",
+        title: "Blue T-Shirt",
+        status: "SYNCED",
+        currentTags: "SS24, Color:Black",
+        appliedTags: ["SS24", "Color:Navy"],
+        currentMetafields: null,
+      },
+    ]);
+    mocks.fetchProductSyncState.mockResolvedValue({
+      tags: ["SS24", "Color:Navy", "merchant-added-later"],
+      descriptionHtml: null,
+      seoTitle: null,
+      metaDescription: null,
+    });
+
+    await action({ request: createRevertRequest(), params: { id: "job-123" } } as any);
+
+    expect(mocks.updateProductTags).toHaveBeenCalledWith(
+      mockAdmin,
+      "gid://shopify/Product/1",
+      ["SS24", "merchant-added-later", "Color:Black"],
+    );
+  });
+
+  it("clears appliedTags so a second revert is a no-op", async () => {
+    mocks.prisma.product.findMany.mockResolvedValue([
+      {
+        id: "gid://shopify/Product/1",
+        title: "Blue T-Shirt",
+        status: "SYNCED",
+        currentTags: "SS24",
+        appliedTags: ["SS24", "Color:Navy"],
+        currentMetafields: null,
+      },
+    ]);
+    mocks.fetchProductSyncState.mockResolvedValue({
+      tags: ["SS24", "Color:Navy"],
+      descriptionHtml: null,
+      seoTitle: null,
+      metaDescription: null,
+    });
+
+    await action({ request: createRevertRequest(), params: { id: "job-123" } } as any);
+
+    expect(mocks.prisma.product.update).toHaveBeenCalledWith({
+      where: { id: "gid://shopify/Product/1" },
+      data: expect.objectContaining({ status: "ANALYZED", syncedAt: null }),
+    });
+  });
+
+  it("falls back to suggestedTags as the delta for products applied before appliedTags existed", async () => {
+    // Those products were written by the version that replaced the whole tag list
+    // with exactly the suggestions, so the suggestions are the best record of
+    // what we wrote.
+    mocks.prisma.product.findMany.mockResolvedValue([
+      {
+        id: "gid://shopify/Product/1",
+        title: "Blue T-Shirt",
+        status: "SYNCED",
+        currentTags: "SS24, clearance",
+        appliedTags: null,
+        suggestedTags: ["Blue Shirt", "Cotton"],
+        currentMetafields: null,
+      },
+    ]);
+    mocks.fetchProductSyncState.mockResolvedValue({
+      tags: ["Blue Shirt", "Cotton"],
+      descriptionHtml: null,
+      seoTitle: null,
+      metaDescription: null,
+    });
+
+    await action({ request: createRevertRequest(), params: { id: "job-123" } } as any);
+
+    expect(mocks.updateProductTags).toHaveBeenCalledWith(
+      mockAdmin,
+      "gid://shopify/Product/1",
+      ["SS24", "clearance"],
+    );
+  });
+
+  it("never full-replaces from a stale snapshot when tags were never synced", async () => {
+    // Applying with the Tags box unticked leaves appliedTags null while
+    // currentTags still holds the scan-time snapshot. Replacing the live list
+    // with that snapshot would delete everything the merchant added since, for a
+    // field the app never touched.
+    mocks.prisma.product.findMany.mockResolvedValue([
+      {
+        id: "gid://shopify/Product/1",
+        title: "Blue T-Shirt",
+        status: "SYNCED",
+        currentTags: "SS24, clearance",
+        appliedTags: null,
+        suggestedTags: null,
+        currentMetafields: null,
+      },
+    ]);
+
+    await action({ request: createRevertRequest(), params: { id: "job-123" } } as any);
+
+    expect(mocks.updateProductTags).not.toHaveBeenCalled();
+  });
+
+  it("does not touch tags for a product that never had any", async () => {
+    mocks.prisma.product.findMany.mockResolvedValue([
+      {
+        id: "gid://shopify/Product/1",
+        title: "Blue T-Shirt",
+        status: "SYNCED",
+        currentTags: null,
+        appliedTags: null,
+        suggestedTags: null,
+        currentMetafields: null,
+      },
+    ]);
+
+    await action({ request: createRevertRequest(), params: { id: "job-123" } } as any);
+
+    expect(mocks.updateProductTags).not.toHaveBeenCalled();
+  });
+
+  it("also reverts a product whose tag write landed while another field failed", async () => {
+    // Such a product keeps status ANALYZED with an error set, so revert must not
+    // be scoped to SYNCED alone or the tags we wrote have no undo path.
+    mocks.prisma.product.findMany.mockResolvedValue([]);
+
+    await action({ request: createRevertRequest(), params: { id: "job-123" } } as any);
+
+    expect(mocks.prisma.product.findMany).toHaveBeenCalledWith({
+      where: {
+        jobId: "job-123",
+        OR: [{ status: "SYNCED" }, { appliedTags: { not: Prisma.DbNull } }],
+      },
     });
   });
 });

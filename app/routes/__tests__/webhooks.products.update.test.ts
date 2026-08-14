@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { Prisma } from "@prisma/client";
 
 // Mock dependencies using vi.hoisted
 const mocks = vi.hoisted(() => ({
@@ -207,6 +208,8 @@ describe("webhooks.products.update", () => {
         shop: "test-shop.myshopify.com",
         status: "QUEUED",
         totalItems: 1,
+        tagFormat: "FREEFORM",
+        tagSchema: Prisma.DbNull,
       },
     });
     // product.create uses a UUID suffix, so check with objectContaining

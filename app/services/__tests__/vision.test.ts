@@ -370,9 +370,7 @@ describe("analyzeProductImage (integration)", () => {
   it("should return parsed result on success", async () => {
     mockCreate.mockResolvedValue(validResponse);
 
-    const result = await analyzeProductImage(
-      "https://cdn.shopify.com/image.jpg"
-    );
+    const result = await analyzeProductImage({ imageUrl: "https://cdn.shopify.com/image.jpg" });
 
     expect(isVisionError(result)).toBe(false);
     if (!isVisionError(result)) {
@@ -385,7 +383,7 @@ describe("analyzeProductImage (integration)", () => {
   it("should optimize image URL to 800x800", async () => {
     mockCreate.mockResolvedValue(validResponse);
 
-    await analyzeProductImage("https://cdn.shopify.com/image.jpg");
+    await analyzeProductImage({ imageUrl: "https://cdn.shopify.com/image.jpg" });
 
     expect(mockCreate).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -420,9 +418,7 @@ describe("analyzeProductImage (integration)", () => {
       ],
     });
 
-    const result = await analyzeProductImage(
-      "https://cdn.shopify.com/image.jpg"
-    );
+    const result = await analyzeProductImage({ imageUrl: "https://cdn.shopify.com/image.jpg" });
 
     expect(isVisionError(result)).toBe(false);
     if (!isVisionError(result)) {
@@ -440,9 +436,7 @@ describe("analyzeProductImage (integration)", () => {
       ],
     });
 
-    const result = await analyzeProductImage(
-      "https://cdn.shopify.com/image.jpg"
-    );
+    const result = await analyzeProductImage({ imageUrl: "https://cdn.shopify.com/image.jpg" });
 
     expect(isVisionError(result)).toBe(true);
     if (isVisionError(result)) {
@@ -462,9 +456,7 @@ describe("analyzeProductImage (integration)", () => {
       ],
     });
 
-    const result = await analyzeProductImage(
-      "https://cdn.shopify.com/image.jpg"
-    );
+    const result = await analyzeProductImage({ imageUrl: "https://cdn.shopify.com/image.jpg" });
 
     expect(isVisionError(result)).toBe(true);
     if (isVisionError(result)) {
@@ -485,9 +477,7 @@ describe("analyzeProductImage (integration)", () => {
       ],
     });
 
-    const result = await analyzeProductImage(
-      "https://cdn.shopify.com/image.jpg"
-    );
+    const result = await analyzeProductImage({ imageUrl: "https://cdn.shopify.com/image.jpg" });
 
     expect(isVisionError(result)).toBe(true);
     if (isVisionError(result)) {
@@ -505,9 +495,7 @@ describe("analyzeProductImage (integration)", () => {
       ],
     });
 
-    const result = await analyzeProductImage(
-      "https://cdn.shopify.com/image.jpg"
-    );
+    const result = await analyzeProductImage({ imageUrl: "https://cdn.shopify.com/image.jpg" });
 
     expect(isVisionError(result)).toBe(true);
     if (isVisionError(result)) {
@@ -519,9 +507,7 @@ describe("analyzeProductImage (integration)", () => {
   it("should return API_ERROR when API throws", async () => {
     mockCreate.mockRejectedValue(new Error("API key invalid"));
 
-    const result = await analyzeProductImage(
-      "https://cdn.shopify.com/image.jpg"
-    );
+    const result = await analyzeProductImage({ imageUrl: "https://cdn.shopify.com/image.jpg" });
 
     expect(isVisionError(result)).toBe(true);
     if (isVisionError(result)) {
@@ -533,7 +519,7 @@ describe("analyzeProductImage (integration)", () => {
   it("should use claude-haiku-4-5-20251001 model", async () => {
     mockCreate.mockResolvedValue(validResponse);
 
-    await analyzeProductImage("https://cdn.shopify.com/image.jpg");
+    await analyzeProductImage({ imageUrl: "https://cdn.shopify.com/image.jpg" });
 
     expect(mockCreate).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -545,9 +531,7 @@ describe("analyzeProductImage (integration)", () => {
   it("should parse description and SEO fields", async () => {
     mockCreate.mockResolvedValue(validResponse);
 
-    const result = await analyzeProductImage(
-      "https://cdn.shopify.com/image.jpg"
-    );
+    const result = await analyzeProductImage({ imageUrl: "https://cdn.shopify.com/image.jpg" });
 
     expect(isVisionError(result)).toBe(false);
     if (!isVisionError(result)) {
@@ -563,12 +547,12 @@ describe("analyzeProductImage (integration)", () => {
   it("should include language in prompt when passed", async () => {
     mockCreate.mockResolvedValue(validResponse);
 
-    await analyzeProductImage(
-      "https://cdn.shopify.com/image.jpg",
-      "fashion",
-      "Test Product",
-      "Portuguese",
-    );
+    await analyzeProductImage({
+      imageUrl: "https://cdn.shopify.com/image.jpg",
+      industryId: "fashion",
+      productTitle: "Test Product",
+      language: "Portuguese",
+    });
 
     const callArgs = mockCreate.mock.calls[0][0];
     const textContent = callArgs.messages[0].content.find(
@@ -580,13 +564,12 @@ describe("analyzeProductImage (integration)", () => {
   it("should include store name in prompt when passed", async () => {
     mockCreate.mockResolvedValue(validResponse);
 
-    await analyzeProductImage(
-      "https://cdn.shopify.com/image.jpg",
-      "fashion",
-      "Test Product",
-      undefined,
-      "Cool Store",
-    );
+    await analyzeProductImage({
+      imageUrl: "https://cdn.shopify.com/image.jpg",
+      industryId: "fashion",
+      productTitle: "Test Product",
+      storeName: "Cool Store",
+    });
 
     const callArgs = mockCreate.mock.calls[0][0];
     const textContent = callArgs.messages[0].content.find(
@@ -598,14 +581,12 @@ describe("analyzeProductImage (integration)", () => {
   it("should include vendor in prompt when passed", async () => {
     mockCreate.mockResolvedValue(validResponse);
 
-    await analyzeProductImage(
-      "https://cdn.shopify.com/image.jpg",
-      "fashion",
-      "Test Sneaker",
-      undefined,
-      undefined,
-      "Adidas",
-    );
+    await analyzeProductImage({
+      imageUrl: "https://cdn.shopify.com/image.jpg",
+      industryId: "fashion",
+      productTitle: "Test Sneaker",
+      vendor: "Adidas",
+    });
 
     const callArgs = mockCreate.mock.calls[0][0];
     const textContent = callArgs.messages[0].content.find(
@@ -628,15 +609,132 @@ describe("analyzeProductImage (integration)", () => {
       ],
     });
 
-    const result = await analyzeProductImage(
-      "https://cdn.shopify.com/image.jpg"
-    );
+    const result = await analyzeProductImage({ imageUrl: "https://cdn.shopify.com/image.jpg" });
 
     expect(isVisionError(result)).toBe(false);
     if (!isVisionError(result)) {
       expect(result.description).toBeUndefined();
       expect(result.seo_title).toBeUndefined();
       expect(result.meta_description).toBeUndefined();
+    }
+  });
+});
+
+describe("analyzeProductImage with a merchant tag schema", () => {
+  const tagSchema = {
+    version: 1 as const,
+    keys: [
+      { key: "Color", values: [{ value: "Black", aliases: [] }, { value: "Navy", aliases: [] }] },
+      { key: "Fit", values: [{ value: "Regular Fit", aliases: [] }] },
+    ],
+  };
+
+  function respondWith(body: unknown) {
+    mockCreate.mockResolvedValue({
+      content: [{ type: "text", text: JSON.stringify(body) }],
+    });
+  }
+
+  it("asks for tag_attributes instead of tags, and lists the allowed values", async () => {
+    respondWith({ metafields: { color: "Navy" }, tag_attributes: { Color: "Navy" } });
+
+    await analyzeProductImage({ imageUrl: "https://cdn.shopify.com/image.jpg", tagSchema });
+
+    const callArgs = mockCreate.mock.calls[0][0];
+    const textContent = callArgs.messages[0].content.find(
+      (c: { type: string }) => c.type === "text"
+    );
+    expect(textContent.text).toContain("tag_attributes");
+    expect(textContent.text).toContain('"Color": one of "Black" | "Navy"');
+    expect(textContent.text).not.toContain("Title Case tags mixing");
+  });
+
+  it("tells the model not to translate the merchant's vocabulary", async () => {
+    respondWith({ metafields: {}, tag_attributes: { Color: "Navy" } });
+
+    await analyzeProductImage({
+      imageUrl: "https://cdn.shopify.com/image.jpg",
+      language: "French",
+      tagSchema,
+    });
+
+    const callArgs = mockCreate.mock.calls[0][0];
+    const textContent = callArgs.messages[0].content.find(
+      (c: { type: string }) => c.type === "text"
+    );
+    expect(textContent.text).toContain("Never translate");
+    // The generic language rule must no longer claim tags are translated.
+    expect(textContent.text).toContain("leave them exactly as given");
+  });
+
+  it("normalizes tag_attributes into flat Key:Value tags", async () => {
+    respondWith({
+      metafields: { color: "Navy" },
+      tag_attributes: { color: "navy", Fit: "Regular" },
+    });
+
+    const result = await analyzeProductImage({
+      imageUrl: "https://cdn.shopify.com/image.jpg",
+      tagSchema,
+    });
+
+    expect(isVisionError(result)).toBe(false);
+    if (!isVisionError(result)) {
+      expect(result.tags).toEqual(["Color:Navy", "Fit:Regular Fit"]);
+    }
+  });
+
+  it("records values the schema rejected", async () => {
+    respondWith({ metafields: {}, tag_attributes: { Color: "Chartreuse" } });
+
+    const result = await analyzeProductImage({
+      imageUrl: "https://cdn.shopify.com/image.jpg",
+      tagSchema,
+    });
+
+    expect(isVisionError(result)).toBe(false);
+    if (!isVisionError(result)) {
+      expect(result.tags).toEqual([]);
+      expect(result.rejected_tag_attributes).toEqual({ Color: ["Chartreuse"] });
+    }
+  });
+
+  it("does NOT treat a missing `tags` field as a parse error in Key:Value mode", async () => {
+    respondWith({ metafields: { color: "Navy" }, tag_attributes: { Color: "Navy" } });
+
+    const result = await analyzeProductImage({
+      imageUrl: "https://cdn.shopify.com/image.jpg",
+      tagSchema,
+    });
+
+    expect(isVisionError(result)).toBe(false);
+  });
+
+  it("returns PARSE_ERROR when tag_attributes is missing in Key:Value mode", async () => {
+    respondWith({ metafields: { color: "Navy" }, tags: ["Navy Blazer"] });
+
+    const result = await analyzeProductImage({
+      imageUrl: "https://cdn.shopify.com/image.jpg",
+      tagSchema,
+    });
+
+    expect(isVisionError(result)).toBe(true);
+    if (isVisionError(result)) {
+      expect(result.code).toBe("PARSE_ERROR");
+    }
+  });
+
+  it("falls back to the free-form path when the schema has no keys", async () => {
+    respondWith({ metafields: {}, tags: ["Navy Blazer"] });
+
+    const result = await analyzeProductImage({
+      imageUrl: "https://cdn.shopify.com/image.jpg",
+      tagSchema: { version: 1, keys: [] },
+    });
+
+    expect(isVisionError(result)).toBe(false);
+    if (!isVisionError(result)) {
+      expect(result.tags).toEqual(["Navy Blazer"]);
     }
   });
 });

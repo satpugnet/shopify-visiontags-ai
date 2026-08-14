@@ -3,6 +3,7 @@ import * as Sentry from "@sentry/remix";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { queueProductAnalysis } from "../services/queue.server";
+import { readTagSchema, writeTagSchema } from "../services/tagSchema.server";
 import { hasAvailableCredits, consumeCredits } from "../services/billing.server";
 import { logger } from "../services/logger.server";
 
@@ -70,11 +71,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     // Use UUID-suffixed ID to avoid conflicts with existing product records from manual scans
     const dbProductId = `${shopifyProductId}-${crypto.randomUUID()}`;
 
+    // Snapshot the shop's tag settings onto the job, exactly like a manual scan:
+    // the worker reads tag config from the Job only, never from ShopSettings.
+    const autoTagSchema = readTagSchema(settings.tagSchema);
+
     const job = await prisma.job.create({
       data: {
         shop,
         status: "QUEUED",
         totalItems: 1,
+        tagFormat: settings.tagFormat === "KEY_VALUE" && autoTagSchema ? "KEY_VALUE" : "FREEFORM",
+        tagSchema: writeTagSchema(autoTagSchema),
       },
     });
 

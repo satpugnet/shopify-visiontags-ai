@@ -23,9 +23,11 @@ import {
   TextField,
 } from "@shopify/polaris";
 import { TitleBar, useAppBridge } from "@shopify/app-bridge-react";
+import { Prisma } from "@prisma/client";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { LANGUAGE_NAMES } from "../services/vision.server";
+import { parseTagFilter, describeTagFilter } from "../services/products.server";
 import { logger } from "../services/logger.server";
 
 const SYNC_BATCH_SIZE = 50;
@@ -72,6 +74,10 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       processed: job.processed,
       createdAt: job.createdAt.toISOString(),
       syncedCount,
+      // What this run was scoped to and which tag style it used. Both are
+      // snapshot on the job, so they stay accurate even after settings change.
+      tagFormat: job.tagFormat,
+      tagFilterLabel: job.tagFilter ? describeTagFilter(parseTagFilter(job.tagFilter)) : null,
     },
     products: job.products.map((p) => ({
       id: p.id,
@@ -157,7 +163,14 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     const { updateProductMetafields } = await import(
       "../services/metafields.server"
     );
-    const { updateProductTags, updateProductImageAlt, updateProductDescriptionAndSeo, fetchProductDescriptionAndSeo } = await import("../services/products.server");
+    const { updateProductTags, updateProductImageAlt, updateProductDescriptionAndSeo, fetchProductSyncState } = await import("../services/products.server");
+    const { readTagSchema, mergeTags } = await import("../services/tagSchema.server");
+
+    // Tag settings come from the job snapshot, not live ShopSettings: this scan's
+    // suggestions were generated against that schema, so it is also the schema
+    // that defines which tag keys we own when merging.
+    const jobTagFormat = jobRecord.tagFormat === "KEY_VALUE" ? "KEY_VALUE" : "FREEFORM";
+    const jobTagSchema = readTagSchema(jobRecord.tagSchema);
 
     let synced = 0;
     let errors = 0;
@@ -173,19 +186,28 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         continue;
       }
 
-      // Store original Shopify data before overwriting (for revert).
-      // Skip the extra read when originals were already captured (re-applies).
-      if (!product.originalDescription && !product.originalSeoTitle && !product.originalMetaDescription) {
+      // Read the product's live state before overwriting it. Two things need it:
+      // the original description/SEO snapshot for revert (captured once), and the
+      // live tag list, which we merge into rather than replace. Skipped only when
+      // neither is needed, i.e. a metafield-only re-apply.
+      const needsOriginals =
+        !product.originalDescription && !product.originalSeoTitle && !product.originalMetaDescription;
+      let liveTags: string[] | null = null;
+
+      if (syncTags || needsOriginals) {
         try {
-          const currentData = await fetchProductDescriptionAndSeo(admin, productId);
-          await prisma.product.update({
-            where: { id: productId },
-            data: {
-              originalDescription: currentData.descriptionHtml,
-              originalSeoTitle: currentData.seoTitle,
-              originalMetaDescription: currentData.metaDescription,
-            },
-          });
+          const currentData = await fetchProductSyncState(admin, productId);
+          liveTags = currentData.tags;
+          if (needsOriginals) {
+            await prisma.product.update({
+              where: { id: productId },
+              data: {
+                originalDescription: currentData.descriptionHtml,
+                originalSeoTitle: currentData.seoTitle,
+                originalMetaDescription: currentData.metaDescription,
+              },
+            });
+          }
         } catch (e) {
           logger.warn("ORIGINAL_DATA_CAPTURE_FAILED", { productId, error: e instanceof Error ? e.message : String(e) });
         }
@@ -230,14 +252,37 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         }
       }
 
-      // Sync tags
-      if (syncTags && suggestedTags) {
-        logger.info("SYNC_TAGS_START", { shop, productId, title: product.title });
-        const result = await updateProductTags(admin, productId, suggestedTags);
-        tagSuccess = result.success;
-        tagError = result.error;
-        if (!tagSuccess) {
+      // Sync tags.
+      //
+      // productUpdate replaces a product's whole tag list, so the merged list is
+      // computed here: schema-owned keys are updated in place and every other
+      // merchant tag survives. If the live tag read failed we refuse to write
+      // rather than fall back to replacing, which would destroy tags we do not own.
+      // An empty list is not a request to clear tags: it means the scan produced
+      // nothing usable (every proposed value fell outside the schema, say). There
+      // is nothing to write, and writing anyway would only burn an API call.
+      let appliedTags: string[] | null = null;
+      if (syncTags && suggestedTags && suggestedTags.length > 0) {
+        if (liveTags === null) {
+          tagSuccess = false;
+          tagError = "Could not read the product's current tags";
           logger.error("SYNC_TAGS_FAILED", { shop, productId, title: product.title, error: tagError });
+        } else {
+          const mergedTags = mergeTags({
+            existing: liveTags,
+            incoming: suggestedTags,
+            format: jobTagFormat,
+            schema: jobTagSchema,
+          });
+          logger.info("SYNC_TAGS_START", { shop, productId, title: product.title, format: jobTagFormat, tagCount: mergedTags.length });
+          const result = await updateProductTags(admin, productId, mergedTags);
+          tagSuccess = result.success;
+          tagError = result.error;
+          if (tagSuccess) {
+            appliedTags = mergedTags;
+          } else {
+            logger.error("SYNC_TAGS_FAILED", { shop, productId, title: product.title, error: tagError });
+          }
         }
       }
 
@@ -279,10 +324,21 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         }
       }
 
+      // Record the tag write whether or not the rest of the sync succeeded: revert
+      // undoes the delta we actually made, so it has to know about a tag write
+      // that landed alongside a failed metafield write. currentTags is refreshed
+      // to the live pre-apply list so it stays the "before our change" snapshot
+      // revert compares against.
+      const tagWriteData =
+        appliedTags && liveTags
+          ? { appliedTags, currentTags: liveTags.join(", ") }
+          : {};
+
       if (metaSuccess && tagSuccess && altTextSuccess && descSuccess) {
         await prisma.product.update({
           where: { id: productId },
           data: {
+            ...tagWriteData,
             status: "SYNCED",
             syncedAt: new Date(),
             error: null,
@@ -297,6 +353,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         await prisma.product.update({
           where: { id: productId },
           data: {
+            ...tagWriteData,
             error: errMsg,
           },
         });
@@ -417,10 +474,17 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 
   if (action === "revert-all") {
     const { updateProductMetafields } = await import("../services/metafields.server");
-    const { updateProductTags, updateProductDescriptionAndSeo } = await import("../services/products.server");
+    const { updateProductTags, updateProductDescriptionAndSeo, fetchProductSyncState } = await import("../services/products.server");
+    const { revertTags } = await import("../services/tagSchema.server");
 
+    // Anything we wrote to Shopify needs an undo path, including a product whose
+    // tag write landed while another field failed - that one stays ANALYZED with
+    // an error set, so scoping to SYNCED alone would strand it.
     const syncedProducts = await prisma.product.findMany({
-      where: { jobId: id!, status: "SYNCED" },
+      where: {
+        jobId: id!,
+        OR: [{ status: "SYNCED" }, { appliedTags: { not: Prisma.DbNull } }],
+      },
     });
 
     let reverted = 0;
@@ -454,17 +518,44 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         }
       }
 
-      // Revert tags
-      if (product.currentTags) {
-        const tags = product.currentTags.split(", ").filter(Boolean);
-        const result = await updateProductTags(admin, product.id, tags);
-        tagSuccess = result.success;
+      // Revert tags by undoing exactly the delta we applied: drop the tags we
+      // added, restore the ones we replaced, and leave anything the merchant
+      // changed in the meantime alone. A full replace back to the snapshot would
+      // wipe every tag added between apply and revert.
+      const appliedTags = product.appliedTags as string[] | null;
+      const snapshotTags = product.currentTags
+        ? product.currentTags.split(", ").filter(Boolean)
+        : [];
+      // Products applied before appliedTags existed were written by a version
+      // that replaced the whole list with exactly the suggestions, so those are
+      // the best available record of what we wrote. Never full-replace back to
+      // the snapshot here: when a merchant applied with the Tags box unticked we
+      // never touched their tags at all, and a replace would delete everything
+      // they have added since.
+      const writtenTags = appliedTags ?? (product.suggestedTags as string[] | null);
+
+      if (writtenTags && writtenTags.length > 0) {
+        try {
+          const live = await fetchProductSyncState(admin, product.id);
+          const restored = revertTags({
+            live: live.tags,
+            applied: writtenTags,
+            snapshot: snapshotTags,
+          });
+          const result = await updateProductTags(admin, product.id, restored);
+          tagSuccess = result.success;
+        } catch (e) {
+          tagSuccess = false;
+          logger.warn("REVERT_TAGS_FAILED", { shop, productId: product.id, error: e instanceof Error ? e.message : String(e) });
+        }
       }
 
       if (descSuccess && metaSuccess && tagSuccess) {
         await prisma.product.update({
           where: { id: product.id },
-          data: { status: "ANALYZED", syncedAt: null },
+          // appliedTags is cleared so a second revert is a no-op rather than
+          // stripping tags the merchant has since re-added by hand.
+          data: { status: "ANALYZED", syncedAt: null, appliedTags: Prisma.DbNull },
         });
         reverted++;
       } else {
@@ -741,7 +832,13 @@ export default function JobDetail() {
     <Page
       backAction={{ content: "Dashboard", onAction: () => navigate("/app") }}
       title="Scan Results"
-      subtitle={`${job.totalItems} products`}
+      subtitle={[
+        `${job.totalItems} products`,
+        job.tagFilterLabel,
+        job.tagFormat === "KEY_VALUE" ? "Key:Value tags" : null,
+      ]
+        .filter(Boolean)
+        .join(" · ")}
     >
       <TitleBar title="Scan Results" />
 
