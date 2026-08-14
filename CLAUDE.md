@@ -197,15 +197,14 @@ resume.
 
 **Last updated**: Aug 14, 2026
 **Current phase**: Live on Shopify App Store
-**Billing**: Uses Shopify Managed Pricing (plans configured in Partner Dashboard, NOT in code)
+**Billing**: Uses Shopify Managed Pricing (plans configured in Partner Dashboard, NOT in code). Free, Pro and Scale are all live in the Partner Dashboard as of Aug 14, 2026.
 **Merchants (as of Jul 26, 2026, from production DB)**: 26 total installs, all on FREE plan. **0 paying — $0 MRR.** The former Pro customer (`resalefirm.myshopify.com`, 816 scans in Mar 2026 — the "Phoenix Publishing" first-paying customer) has churned back to FREE. No active subscription charges (confirmed via Partner API: no `SUBSCRIPTION_CHARGE_ACTIVATED` events in recent history). Several free installs hit the 50-credit cap and uninstalled rather than upgrading (`bgjgv1-6z`, `0fe70f-2c`, `a2f506-2`) — the paid-conversion leak. Steady trickle of new installs continues (last install Jul 26).
 **Next steps**:
-1. Create the "Scale" plan in the Partner Dashboard Managed Pricing UI ($79/mo, display name exactly `Scale`, 0 trial days) — code shipped Aug 11, waiting on this manual step
-2. Reply to LaFetch (Sagar@la-fetch.com): Key:Value tags + tag filters shipped Aug 14; get them upgraded to Scale for the 12k backfill
-3. Reinstall the app on the dev store so end-to-end testing works again (token revoked)
-4. Grow distribution (App Store SEO, content marketing, direct outreach)
-5. Remaining quick wins: custom prompts on the settings page, free tier bump, Pro repricing to $29
-6. Fast-follow: job-detail page pagination (2,000-row Scale jobs load unpaginated), jobs history page, collections picker >50, surface `Product.rejectedTagAttributes` as a "the AI proposed N values your schema rejects — add them?" prompt
+1. Reply to LaFetch (Sagar@la-fetch.com): Key:Value tags + tag filters shipped Aug 14; get them upgraded to Scale for the 12k backfill
+2. Reinstall the app on the dev store so end-to-end testing works again (token revoked). Nothing in the Aug 14 release has been exercised against a real store — do a scan/apply/revert there before LaFetch runs the backfill
+3. Grow distribution (App Store SEO, content marketing, direct outreach)
+4. Remaining quick wins: custom prompts on the settings page, free tier bump, Pro repricing to $29
+5. Fast-follow: job-detail page pagination (2,000-row Scale jobs load unpaginated), jobs history page, collections picker >50, surface `Product.rejectedTagAttributes` as a "the AI proposed N values your schema rejects — add them?" prompt
 
 ## Development Commands
 
